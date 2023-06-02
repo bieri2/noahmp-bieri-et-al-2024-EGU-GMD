@@ -220,7 +220,7 @@ MODULE MODULE_SF_NOAHMPLSM
   REAL, PARAMETER :: DENICE = 917.0      !density of ice (kg/m3)
 
   INTEGER, PRIVATE, PARAMETER :: MBAND = 2
-  INTEGER, PRIVATE, PARAMETER :: NSOIL = 4
+  INTEGER, PRIVATE, PARAMETER :: NSOIL = 12
   INTEGER, PRIVATE, PARAMETER :: NSTAGE = 8
 
 ! add control for a different soil timestep capability
@@ -489,7 +489,9 @@ contains
                    QEVAC   , QDEWC   , QMELT   ,                               & ! OUT
                    RAIN    , SNOW    , ACC_SSOIL, ACC_QINSUR, ACC_QSEVA      , & ! OUT
                    ACC_ETRANI, HCPCT , EFLXB   , CANHS   ,                     & ! OUT :
-                   ACC_DWATER, ACC_PRCP, ACC_ECAN, ACC_ETRAN, ACC_EDIR         & ! INOUT
+                   ACC_DWATER, ACC_PRCP, ACC_ECAN, ACC_ETRAN, ACC_EDIR       , & ! INOUT
+                   EASY    , ROOTACTIVITY      , INACTIVE, KROOT   , KWTD    , & ! Root scheme variables 
+                   PSI     , GWRD    , FDEPTH  , ITIMESTEP, BTRANI             &
 #ifdef WRF_HYDRO
                    ,SFCHEADRT, WATBLED                                         & ! IN/OUT :
 #endif
@@ -668,6 +670,17 @@ contains
   REAL                                           :: BEVAP  !soil water evaporation factor (0 - 1)
   REAL, DIMENSION(       1:NSOIL)                :: BTRANI !Soil water transpiration factor (0 - 1)
   REAL                                           :: BTRAN  !soil water transpiration factor (0 - 1)
+  ! Root scheme variables - CB
+  REAL, DIMENSION(       1:NSOIL), INTENT(INOUT) :: EASY   !ease function (0 - 1)
+  REAL, DIMENSION(       1:NSOIL), INTENT(INOUT) :: ROOTACTIVITY ! root activity function
+  REAL, DIMENSION(       1:NSOIL), INTENT(INOUT) :: INACTIVE     ! number of days with inactive roots
+  INTEGER, INTENT(INOUT)                         :: KROOT        ! layer depth of root zone
+  INTEGER, INTENT(INOUT)                         :: KWTD         ! layer depths of water table
+  INTEGER, INTENT(IN)                            :: ITIMESTEP    ! timestep count
+  REAL, DIMENSION(       1:NSOIL), INTENT(INOUT) :: PSI          ! soil matric potential 
+  INTEGER, INTENT(INOUT)                         :: GWRD         ! layer depth of root water uptake
+  REAL                                           :: FDEPTH       ! e-folding depth of permeability (m)
+
   REAL                                           :: QIN    !groundwater recharge [mm/s]
   REAL                                           :: QDIS   !groundwater discharge [mm/s]
   REAL, DIMENSION(       1:NSOIL)                :: SICE   !soil ice content (m3/m3)
@@ -1002,12 +1015,12 @@ contains
                  QIN    ,QDIS   ,PONDING1       ,PONDING2,        &
                  QSNBOT ,QTLDRN ,                                 &
                  QSNSUB ,QSNFRO ,QSUBC  ,QFROC  ,QFRZC  ,QMELTC , &
-                 QEVAC  ,QDEWC  ,ACC_QINSUR ,ACC_QSEVA,ACC_ETRANI &
+                 QEVAC  ,QDEWC  ,ACC_QINSUR ,ACC_QSEVA,ACC_ETRANI,&
+                 ROOTACTIVITY, ITIMESTEP, GWRD, FDEPTH            & ! Root scheme
 #ifdef WRF_HYDRO
                         ,sfcheadrt,WATBLED                        &
 #endif
                  )  !out
-
 
 ! compute carbon budgets (carbon storages and co2 & bvoc fluxes)
 
@@ -1723,6 +1736,7 @@ ENDIF   ! CROPTYPE == 0
            call wrf_message(trim(message))
            WRITE(message,'(i6,i6,f10.3,10f10.5)')ILOC,JLOC,ACC_DWATER,ACC_PRCP,IRMIRATE*1000.0,&
                 IRFIRATE*1000.0,ACC_ECAN,ACC_EDIR,ACC_ETRAN,RUNSRF,RUNSUB,ZWT,QTLDRN
+           
            call wrf_message(trim(message))
            call wrf_error_fatal("Water budget problem in NOAHMP LSM")
         END IF
@@ -5963,7 +5977,8 @@ ENDIF   ! CROPTYPE == 0
                     QIN    ,QDIS   ,PONDING1       ,PONDING2,        &
                     QSNBOT ,QTLDRN ,                                 &
                     QSNSUB ,QSNFRO ,QSUBC  ,QFROC  ,QFRZC  ,QMELTC , &
-                    QEVAC  ,QDEWC  ,ACC_QINSUR,ACC_QSEVA ,ACC_ETRANI &
+                    QEVAC  ,QDEWC  ,ACC_QINSUR,ACC_QSEVA ,ACC_ETRANI,&
+                    ROOTACTIVITY, ITIMESTEP, GWRD, FDEPTH            & ! Root scheme
 #ifdef WRF_HYDRO
                         ,sfcheadrt ,WATBLED                          &
 #endif
@@ -6008,6 +6023,9 @@ ENDIF   ! CROPTYPE == 0
   REAL                           , INTENT(IN)    :: QSNOW   !snow at ground srf (mm/s) [+]
   REAL                           , INTENT(IN)    :: QRAIN   !rain at ground srf (mm) [+]
   REAL                           , INTENT(IN)    :: SNOWHIN !snow depth increasing rate (m/s)
+  REAL, DIMENSION(       1:NSOIL), INTENT(IN)    :: ROOTACTIVITY ! Root activity function
+  INTEGER,                         INTENT(IN)    :: ITIMESTEP    ! Time step count
+  REAL                           , INTENT(IN)    :: FDEPTH       ! E-folding depth of permeability 
 
 ! input/output
   INTEGER,                         INTENT(INOUT) :: ISNOW   !actual no. of snow layers
@@ -6034,6 +6052,7 @@ ENDIF   ! CROPTYPE == 0
   REAL,                            INTENT(INOUT) :: DEEPRECH !recharge to or from the water table when deep [m]
   REAL,                            INTENT(INOUT) :: RECH !recharge to or from the water table when shallow [m] (diagnostic)
   REAL,                            INTENT(INOUT) :: QTLDRN   !tile drainage (mm) per soil timestep
+  INTEGER,                         INTENT(INOUT) :: GWRD    ! Layer depth of root water uptake [-]
   REAL,                            INTENT(IN)    :: DX
   REAL,                            INTENT(IN)    :: TDFRACMP !tile drain fraction map
 
@@ -6089,6 +6108,13 @@ ENDIF   ! CROPTYPE == 0
   real                                           :: qinsur_avg
   real                                           :: qseva_avg
   real, dimension(1:nsoil)                       :: etrani_avg
+  REAL                                           :: ETRANSUM    !column-wise sum of ETRAN 
+  REAL                                           :: SMCMAXDEEP  
+  REAL                                           :: PSISATDEEP
+  REAL, PARAMETER                                :: intdepth = -22.5  ! Depth used to calculate soil parameters
+                                                                      ! for MMF variably thick layer
+
+
 
   REAL, PARAMETER ::  WSLMAX = 5000.0      !maximum lake water storage (mm)
 
@@ -6105,6 +6131,10 @@ ENDIF   ! CROPTYPE == 0
    RUNSRF          = 0.0
    QINSUR          = 0.0
    QTLDRN          = 0.0
+
+! Calculate soil properties for variably thick layer
+   SMCMAXDEEP = parameters%SMCMAX(1)*max(min(exp((intdepth+1.5)/FDEPTH),1.),0.1)   ! CB
+   PSISATDEEP = parameters%PSISAT(1)*max(min(exp(-(intdepth+1.5)/FDEPTH),1.),10.)  ! CB
 
 ! canopy-intercepted snowfall/rainfall, drips, and throughfall
 
@@ -6207,7 +6237,7 @@ ENDIF   ! CROPTYPE == 0
            WSLAKE = WSLAKE + (QINSUR_avg-QSEVA_avg)*1000.0*Dt_soil - RUNSRF   !mm per soil timestep
        ELSE                                                      ! soil
            CALL  SOILWATER (parameters,NSOIL  ,NSNOW  ,DT_soil ,ZSOIL  ,DZSNSO , & !in
-                            QINSUR_avg,QSEVA_avg,ETRANI_avg,SICE   ,ILOC   , JLOC ,     & !in
+                            QINSUR_avg,QSEVA_avg,ETRANI_avg,SICE   ,ILOC   , JLOC , SMCMAXDEEP, & !in
                             TDFRACMP,DX    ,                                    & !in
                             SH2O   ,SMC    ,ZWT    ,VEGTYP ,                    & !inout
                             SMCWTD, DEEPRECH,                                   & !inout
@@ -6216,7 +6246,6 @@ ENDIF   ! CROPTYPE == 0
                             ,WATBLED                                            & !in for tile drainage
 #endif
                             )
- 
           IF(OPT_RUN == 1) THEN 
              CALL GROUNDWATER (parameters,NSNOW  ,NSOIL  ,DT_soil  ,SICE   ,ZSOIL  , & !in
                                STC    ,WCND   ,FCRMAX ,ILOC   ,JLOC   , & !in
@@ -6236,7 +6265,7 @@ ENDIF   ! CROPTYPE == 0
  
           IF(OPT_RUN == 5) THEN
              CALL SHALLOWWATERTABLE (parameters,NSNOW  ,NSOIL, ZSOIL, DT_soil   , & !in
-                            DZSNSO ,SMCEQ   ,ILOC , JLOC        , & !in
+                            DZSNSO ,SMCEQ   ,ILOC , JLOC, SMCMAXDEEP, PSISATDEEP, & !in
                             SMC    ,ZWT    ,SMCWTD ,RECH, QDRAIN  ) !inout
 
              SH2O(NSOIL) = SMC(NSOIL) - SICE(NSOIL)
@@ -7227,7 +7256,7 @@ ENDIF   ! CROPTYPE == 0
 !== begin soilwater ================================================================================
 
   SUBROUTINE SOILWATER (parameters,NSOIL  ,NSNOW ,DT ,ZSOIL  ,DZSNSO , & !in
-                        QINSUR ,QSEVA  ,ETRANI ,SICE   ,ILOC   , JLOC, & !in
+                        QINSUR ,QSEVA  ,ETRANI ,SICE   ,ILOC   , JLOC, SMCMAXDEEP, & !in
                         TDFRACMP, DX   ,                               & !in
                         SH2O   ,SMC    ,ZWT    ,VEGTYP ,               & !inout
                         SMCWTD, DEEPRECH,                              & !inout
@@ -7258,6 +7287,8 @@ ENDIF   ! CROPTYPE == 0
   REAL, DIMENSION(1:NSOIL), INTENT(IN)    :: SICE   !soil ice content [m3/m3]
   REAL,                     INTENT(IN)    :: DX
   REAL,                     INTENT(IN)    :: TDFRACMP! tile drainage map(fraction)
+  REAL,                        INTENT(IN) :: SMCMAXDEEP ! Soil moisture at saturation for variably thick layer
+
   INTEGER,                     INTENT(IN) :: VEGTYP
 
 ! input & output
@@ -7461,14 +7492,15 @@ ENDIF   ! CROPTYPE == 0
                            ZSOIL,QINSUR,FACC,PDDUM,RUNSRF)
        END IF
 
+
        CALL SRT   (parameters,NSOIL  ,ZSOIL  ,DTFINE ,PDDUM  ,ETRANI , & !in
                    QSEVA  ,SH2O   ,SMC    ,ZWT    ,FCR    , & !in
                    SICEMAX,FCRMAX ,ILOC   ,JLOC   ,SMCWTD ,         & !in
                    RHSTT  ,AI     ,BI     ,CI     ,QDRAIN , & !out
                    WCND   )                                   !out
-  
+ 
        CALL SSTEP (parameters,NSOIL  ,NSNOW  ,DTFINE ,ZSOIL  ,DZSNSO , & !in
-                   SICE   ,ILOC   ,JLOC   ,ZWT            ,                 & !in
+                   SICE   ,ILOC   ,JLOC   ,ZWT            , SMCMAXDEEP, & !in
                    SH2O   ,SMC    ,AI     ,BI     ,CI     , & !inout
                    RHSTT  ,SMCWTD ,QDRAIN ,DEEPRECH,                                 & !inout
                    WPLUS)                                     !out
@@ -7521,7 +7553,6 @@ ENDIF   ! CROPTYPE == 0
       DO IZ = 1, NSOIL
          MLIQ(IZ) = SH2O(IZ)*DZSNSO(IZ)*1000.0
       END DO
-
       WATMIN = 0.01           ! mm
       DO IZ = 1, NSOIL-1
           IF (MLIQ(IZ) .LT. 0.0) THEN
@@ -7532,7 +7563,6 @@ ENDIF   ! CROPTYPE == 0
           MLIQ(IZ  ) = MLIQ(IZ  ) + XS
           MLIQ(IZ+1) = MLIQ(IZ+1) - XS
       END DO
-
         IZ = NSOIL
         IF (MLIQ(IZ) .LT. WATMIN) THEN
            XS = WATMIN-MLIQ(IZ)
@@ -7843,7 +7873,7 @@ ENDIF   ! CROPTYPE == 0
 !== begin sstep ====================================================================================
 
   SUBROUTINE SSTEP (parameters,NSOIL  ,NSNOW  ,DT     ,ZSOIL  ,DZSNSO , & !in
-                    SICE   ,ILOC   ,JLOC   ,ZWT            ,                 & !in
+                    SICE   ,ILOC   ,JLOC   ,ZWT    ,SMCMAXDEEP,         & !in
                     SH2O   ,SMC    ,AI     ,BI     ,CI     , & !inout
                     RHSTT  ,SMCWTD ,QDRAIN ,DEEPRECH,                                 & !inout
                     WPLUS  )                                   !out
@@ -7865,6 +7895,7 @@ ENDIF   ! CROPTYPE == 0
     REAL, DIMENSION(       1:NSOIL), INTENT(IN) :: ZSOIL
     REAL, DIMENSION(       1:NSOIL), INTENT(IN) :: SICE
     REAL, DIMENSION(-NSNOW+1:NSOIL), INTENT(IN) :: DZSNSO ! snow/soil layer thickness [m]
+    REAL,                            INTENT(IN) :: SMCMAXDEEP ! Soil moisture at saturation for variably thick layer
 
 !input and output
     REAL, DIMENSION(1:NSOIL), INTENT(INOUT) :: SH2O
@@ -7925,10 +7956,10 @@ ENDIF   ! CROPTYPE == 0
         DEEPRECH =  DEEPRECH + DT * QDRAIN
      ELSE
         SMCWTD = SMCWTD + DT * QDRAIN  / DZSNSO(NSOIL)
-        WPLUS        = MAX((SMCWTD-parameters%SMCMAX(NSOIL)), 0.0) * DZSNSO(NSOIL)
+        WPLUS        = MAX((SMCWTD-SMCMAXDEEP), 0.0) * DZSNSO(NSOIL)
         WMINUS       = MAX((1.0E-4-SMCWTD), 0.0) * DZSNSO(NSOIL)
 
-        SMCWTD = MAX( MIN(SMCWTD,parameters%SMCMAX(NSOIL)) , 1.0E-4)
+        SMCWTD = MAX( MIN(SMCWTD,SMCMAXDEEP) , 1.0E-4)
         SH2O(NSOIL)    = SH2O(NSOIL) + WPLUS/DZSNSO(NSOIL)
 
 !reduce fluxes at the bottom boundaries accordingly
@@ -9767,7 +9798,7 @@ END SUBROUTINE RR2
 !== begin shallowwatertable ========================================================================
 
   SUBROUTINE SHALLOWWATERTABLE (parameters,NSNOW  ,NSOIL  ,ZSOIL, DT    , & !in
-                         DZSNSO ,SMCEQ ,ILOC   ,JLOC         , & !in
+                         DZSNSO ,SMCEQ ,ILOC   ,JLOC, SMCMAXDEEP, PSISATDEEP, & !in
                          SMC    ,WTD   ,SMCWTD ,RECH, QDRAIN  )  !inout
 ! ----------------------------------------------------------------------
 !Diagnoses water table depth and computes recharge when the water table is within the resolved soil layers,
@@ -9784,6 +9815,8 @@ END SUBROUTINE RR2
   REAL, DIMENSION(       1:NSOIL), INTENT(IN) :: ZSOIL !depth of soil layer-bottom [m]
   REAL, DIMENSION(-NSNOW+1:NSOIL), INTENT(IN) :: DZSNSO ! snow/soil layer thickness [m]
   REAL,  DIMENSION(      1:NSOIL), INTENT(IN) :: SMCEQ  !equilibrium soil water  content [m3/m3]
+  REAL,                            INTENT(IN) :: SMCMAXDEEP
+  REAL,                            INTENT(IN) :: PSISATDEEP
 
 ! input and output
   REAL,  DIMENSION(      1:NSOIL), INTENT(INOUT) :: SMC   !total soil water  content [m3/m3]
@@ -9864,41 +9897,48 @@ ZSOIL0(0) = 0.0
 !                   QDRAIN = QDRAIN - 1000 * (SMCEQ(NSOIL)-SMC(NSOIL)) * DZSNSO(NSOIL) / DT
 !                   SMC(NSOIL)=SMCEQ(NSOIL)
 !adjust wtd in the ficticious layer below
-                   SMCEQDEEP = parameters%SMCMAX(NSOIL) * ( -parameters%PSISAT(NSOIL) / ( -parameters%PSISAT(NSOIL) - DZSNSO(NSOIL) ) ) ** (1.0/parameters%BEXP(NSOIL))
+                   SMCEQDEEP = SMCMAXDEEP * ( -PSISATDEEP / ( -PSISATDEEP - DZSNSO(NSOIL) ) ) ** (1.0/parameters%BEXP(NSOIL))
                    WTD = MIN( ( SMCWTD*DZSNSO(NSOIL) &
-                   - SMCEQDEEP*ZSOIL0(NSOIL) + parameters%SMCMAX(NSOIL)*(ZSOIL0(NSOIL)-DZSNSO(NSOIL)) ) / &
-                       ( parameters%SMCMAX(NSOIL)-SMCEQDEEP ) , ZSOIL0(NSOIL) )
+                   - SMCEQDEEP*ZSOIL0(NSOIL) + SMCMAXDEEP*(ZSOIL0(NSOIL)-DZSNSO(NSOIL)) ) / &
+                       ( SMCMAXDEEP-SMCEQDEEP ) , ZSOIL0(NSOIL) )
                    RECH = RECH - (WTDOLD-WTD) * &
-                                 (parameters%SMCMAX(NSOIL)-SMCEQDEEP)
+                                 (SMCMAXDEEP-SMCEQDEEP)
                 ENDIF
             
             ENDIF
         ELSEIF(WTD.GE.ZSOIL0(NSOIL)-DZSNSO(NSOIL))THEN
 !if wtd was already below the bottom of the resolved soil crust
            WTDOLD=WTD
-           SMCEQDEEP = parameters%SMCMAX(NSOIL) * ( -parameters%PSISAT(NSOIL) / ( -parameters%PSISAT(NSOIL) - DZSNSO(NSOIL) ) ) ** (1.0/parameters%BEXP(NSOIL))
+           SMCEQDEEP = SMCMAXDEEP * ( -PSISATDEEP / ( -PSISATDEEP - DZSNSO(NSOIL) ) ) ** (1.0/parameters%BEXP(NSOIL))
            IF(SMCWTD.GT.SMCEQDEEP)THEN
                WTD = MIN( ( SMCWTD*DZSNSO(NSOIL) &
-                 - SMCEQDEEP*ZSOIL0(NSOIL) + parameters%SMCMAX(NSOIL)*(ZSOIL0(NSOIL)-DZSNSO(NSOIL)) ) / &
-                     ( parameters%SMCMAX(NSOIL)-SMCEQDEEP ) , ZSOIL0(NSOIL) )
-               RECH = -(WTDOLD-WTD) * (parameters%SMCMAX(NSOIL)-SMCEQDEEP)
+                 - SMCEQDEEP*ZSOIL0(NSOIL) + SMCMAXDEEP*(ZSOIL0(NSOIL)-DZSNSO(NSOIL)) ) / &
+                     ( SMCMAXDEEP-SMCEQDEEP ) , ZSOIL0(NSOIL) )
+               RECH = -(WTDOLD-WTD) * (SMCMAXDEEP-SMCEQDEEP)
            ELSE
-               RECH = -(WTDOLD-(ZSOIL0(NSOIL)-DZSNSO(NSOIL))) * (parameters%SMCMAX(NSOIL)-SMCEQDEEP)
+               RECH = -(WTDOLD-(ZSOIL0(NSOIL)-DZSNSO(NSOIL))) * (SMCMAXDEEP-SMCEQDEEP)
                WTDOLD=ZSOIL0(NSOIL)-DZSNSO(NSOIL)
 !and now even further down
-               DZUP=(SMCEQDEEP-SMCWTD)*DZSNSO(NSOIL)/(parameters%SMCMAX(NSOIL)-SMCEQDEEP)
+               DZUP=(SMCEQDEEP-SMCWTD)*DZSNSO(NSOIL)/(SMCMAXDEEP-SMCEQDEEP)
                WTD=WTDOLD-DZUP
-               RECH = RECH - (parameters%SMCMAX(NSOIL)-SMCEQDEEP)*DZUP
+               RECH = RECH - (SMCMAXDEEP-SMCEQDEEP)*DZUP
                SMCWTD=SMCEQDEEP
            ENDIF
 
          
          ENDIF
 
-IF(IWTD .LT. NSOIL .AND. IWTD .GT. 0) THEN
-  SMCWTD=parameters%SMCMAX(IWTD)
-ELSEIF(IWTD .LT. NSOIL .AND. IWTD .LE. 0) THEN
-  SMCWTD=parameters%SMCMAX(1)
+!IF(IWTD .LT. NSOIL .AND. IWTD .GT. 0) THEN
+!  SMCWTD=parameters%SMCMAX(IWTD)
+!ELSEIF(IWTD .LT. NSOIL .AND. IWTD .LE. 0) THEN
+!  SMCWTD=parameters%SMCMAX(1)
+!END IF
+
+
+IF(IWTD.LT.NSOIL) THEN
+
+  SMCWTD = SMCMAXDEEP
+
 END IF
 
 END  SUBROUTINE SHALLOWWATERTABLE
