@@ -986,7 +986,9 @@ contains
                  EMISSI ,PAH    ,CANHS  ,                         & !out
 		 SHG,SHC,SHB,EVG,EVB,GHV,GHB,IRG,IRC,IRB,TR,EVC,CHLEAF,CHUC,CHV2,CHB2,&
                  EFLXB, HCPCT, ACC_SSOIL, &
-                 JULIAN, SWDOWN, PRCP, FB, GECROS1D )        
+                 JULIAN, SWDOWN, PRCP, FB, GECROS1D, &
+                 EASY   , ROOTACTIVITY  , ZWT   , INACTIVE, KROOT,& ! Root scheme 
+                 KWTD   , PSI   , FDEPTH )        
 !jref:end
 
     SICE(:) = MAX(0.0, SMC(:) - SH2O(:))   
@@ -1777,7 +1779,8 @@ ENDIF   ! CROPTYPE == 0
                      Q1     ,Q2V    ,Q2B    ,Q2E    ,CHV  ,CHB, EMISSI, PAH, CANHS, &
 		     SHG,SHC,SHB,EVG,EVB,GHV,GHB,IRG,IRC,IRB,TR,EVC,CHLEAF,CHUC,CHV2,CHB2, &
                      EFLXB  ,HCPCT  ,ACC_SSOIL, &
-                     JULIAN, SWDOWN, PRCP, FB, GECROS1D )        
+                     JULIAN, SWDOWN, PRCP, FB, GECROS1D, &
+                     EASY, ROOTACTIVITY, ZWT, INACTIVE, KROOT, KWTD, PSIZ, FDEPTH) ! Root scheme
 !jref:end                            
 
 ! --------------------------------------------------------------------------------------------------
@@ -1992,6 +1995,28 @@ ENDIF   ! CROPTYPE == 0
   REAL                                              :: PSI    !surface layer soil matrix potential (m)
   REAL                                              :: RHSUR  !raltive humidity in surface soil/snow air space (-)
 
+  REAL                                              :: HCAN   !canopy height (m)
+
+! Root scheme variables 
+  REAL                                              :: soilfactor      ! for root scheme calculation, indicates if frozen
+  REAL,   DIMENSION(1:NSOIL),INTENT(INOUT)          :: EASY            ! ease function for root water uptake
+  REAL,   DIMENSION(1:NSOIL)                        :: INACTIVEDAYS    ! number of days without active roots
+  REAL                                              :: maxinactivedays ! max number of days without active roots
+  INTEGER,INTENT(INOUT)                             :: KROOT           ! layer depth of root zone
+  INTEGER,DIMENSION(1:NSOIL)                        :: ROOTMASK        ! mask for layers without active roots
+  REAL                                              :: TOTEASY, MAXEASY! variables needed for root scheme calculation
+  REAL,   DIMENSION(1:NSOIL),INTENT(INOUT)          :: ROOTACTIVITY    ! root activity function
+  REAL                      ,INTENT(IN)             :: ZWT             ! depth to water table [m]
+  REAL,   DIMENSION(1:NSOIL),INTENT(INOUT)          :: INACTIVE        ! number of timesteps without active roots
+  INTEGER,INTENT(INOUT)                             :: KWTD            ! layer depth of water table
+  INTEGER                                           :: IWTD           
+  REAL,   DIMENSION(1:NSOIL),INTENT(INOUT)          :: PSIZ            ! soil matric potential
+  REAL                                              :: FDEPTH          ! e-folding depth of permeability
+  REAL                                              :: psisat          ! saturated matric potential
+  REAL                                              :: smoisat         ! saturated soil moistur content
+  REAL                                              :: mid             ! depth of layer midpoints
+  REAL,   DIMENSION(1:NSOIL)                        :: dzsroot         ! layer thickness
+
 ! temperature and fluxes over vegetated fraction
 
   REAL                                              :: TAUXV  !wind stress: e-w dir [n/m2]
@@ -2041,7 +2066,20 @@ ENDIF   ! CROPTYPE == 0
 
   REAL, PARAMETER                   :: MPE    = 1.E-6
   REAL, PARAMETER                   :: PSIWLT = -150.0  !metric potential for wilting point (m)
+  REAL, PARAMETER                   :: PSILF  = -204.0  ! leaf wilting point matric potential (m) 
   REAL, PARAMETER                   :: Z0     = 0.002   ! Bare-soil roughness length (m) (i.e., under the canopy)
+
+
+! initialize root scheme variables
+
+    maxinactivedays = 365*86400
+    rootmask = 0               
+    easy = 0.0                  
+    rootactivity = 0.0          
+    inactivedays = 0.0         
+    kroot = 0                  
+    kwtd  = 0                  
+    psiz  = 0.0      
 
 ! ---------------------------------------------------------------------------------------------------
 ! initialize fluxes from veg. fraction
@@ -2159,7 +2197,8 @@ ENDIF   ! CROPTYPE == 0
 
 ! soil moisture factor controlling stomatal resistance
    
-     BTRAN = 0.0
+     BTRAN  = 0.0
+     BTRANI = 0.0
 
      IF(IST ==1 ) THEN
        DO IZ = 1, parameters%NROOT
@@ -2182,6 +2221,95 @@ ENDIF   ! CROPTYPE == 0
        BTRAN = MAX(MPE,BTRAN)
 
        BTRANI(1:parameters%NROOT) = BTRANI(1:parameters%NROOT)/BTRAN
+
+
+     ! Rooting scheme (Fan et al. 2017) ------------------------------------------------
+
+     ! Determine layer with water table, if within resolved soil layers
+
+       DO IZ = 1,NSOIL
+         if(ZWT .gt. ZSOIL(IZ))exit
+       END DO
+
+       KWTD = MIN(IZ,NSOIL)
+       iwtd = IZ-1
+
+     ! Adjust layer thickness accordingly
+
+       dzsroot = DZSNSO(1:NSOIL)
+       dzsroot(kwtd) = -1*(ZWT-ZSOIL(iwtd))
+
+     ! Determine layers with active roots - depth of root zone
+
+       INACTIVEDAYS(1:NSOIL) = INACTIVE(1:NSOIL)*DT ! Convert # of inactive timesteps to inactive days (in seconds)
+
+       DO IZ = 1,NSOIL
+        if(INACTIVEDAYS(IZ).gt.maxinactivedays)exit
+       END DO
+       KROOT = MIN(IZ-1,NSOIL)                ! Bottom layer of root zone
+
+       HCAN = parameters%HVT*(2./3.) ! Canopy height
+
+       ! Start calculation of ease function and root activity
+       DO IZ = 1,min(kroot,kwtd)
+         IF(IZ==1) THEN            ! Get layer midpoints
+           mid = -0.05
+         ELSE
+           mid =  0.5 * (ZSOIL(IZ-1) + ZSOIL(IZ))
+         ENDIF
+
+         ! Calculate PSI
+
+         PSIZ(IZ)  = MAX(PSIWLT,-parameters%PSISAT(IZ)*(MAX(0.01,SH2O(IZ))/parameters%SMCMAX(IZ))**(-parameters%BEXP(IZ)) )
+
+         if(INACTIVEDAYS(IZ).le.maxinactivedays) ROOTMASK(IZ)=1    ! Set root mask accordingly
+
+         ! Account for frozen soil
+         IF(ICE.eq.0) THEN
+           soilfactor = 1.
+         ELSE
+           soilfactor = 0.
+         ENDIF
+
+         ! Calculate ease function
+         EASY(IZ) = MAX(-( PSIWLT - PSIZ(IZ) )*soilfactor / ( HCAN-mid ) ,0.)
+       END DO
+
+       !to grow roots anew, the layer has to be easiest to get water from than the
+       !current active layers with roots
+
+       maxeasy = MAXVAL(EASY,ROOTMASK == 1)
+
+       !eliminate small root activity
+       where(EASY .lt. 0.001*MAXEASY) EASY = 0.
+
+       DO IZ = 1,KROOT
+         if(INACTIVEDAYS(IZ).gt.maxinactivedays.and.EASY(IZ).lt.maxeasy) EASY(IZ) = 0.
+       ENDDO
+
+       TOTEASY = SUM(EASY*dzsroot(1:NSOIL))
+
+       ! Calculate root activity
+
+       IF(TOTEASY.eq.0.)THEN
+         ROOTACTIVITY = 0.
+       ELSE
+         ROOTACTIVITY = MIN(MAX((EASY*dzsroot(1:NSOIL)) /  TOTEASY , 0. ), 1. )
+       ENDIF
+
+       ! Increment or restart inactive timestep count based on root activity
+       DO IZ = 1,NSOIL
+         IF(EASY(IZ).eq.0.)THEN
+           INACTIVE(IZ) = INACTIVE(IZ) + 1
+         ELSE
+           INACTIVE(IZ) = 0
+         ENDIF
+       ENDDO
+
+       INACTIVEDAYS=min(INACTIVEDAYS,MAXINACTIVEDAYS+1)
+
+     ! /CB - end of roots ---------------------------------------------------------
+
      END IF
 
 ! soil surface resistance for ground evap.
@@ -6134,7 +6262,7 @@ ENDIF   ! CROPTYPE == 0
 
 ! Calculate soil properties for variably thick layer
    SMCMAXDEEP = parameters%SMCMAX(1)*max(min(exp((intdepth+1.5)/FDEPTH),1.),0.1)   ! CB
-   PSISATDEEP = parameters%PSISAT(1)*max(min(exp(-(intdepth+1.5)/FDEPTH),1.),10.)  ! CB
+   PSISATDEEP = parameters%PSISAT(1)*min(max(exp(-(intdepth+1.5)/FDEPTH),1.),10.)  ! CB
 
 ! canopy-intercepted snowfall/rainfall, drips, and throughfall
 
@@ -6192,7 +6320,29 @@ ENDIF   ! CROPTYPE == 0
     QSEVA  = QSEVA * 0.001 
 
     DO IZ = 1, parameters%NROOT
-       ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001
+       IF ((ITIMESTEP*DT) .LE. 365*86400) THEN           ! Added if statements here - CB
+          ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001        ! Original line 
+       ELSE                                              
+          ETRANI(IZ) = ETRAN * ROOTACTIVITY(IZ) * 0.001  ! Use root activity instead of beta 
+       END IF                                            ! Only if model running for at least 1yr
+    ENDDO
+
+    !DO IZ = 1, parameters%NROOT
+    !   ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001
+    !ENDDO
+
+    ETRANSUM = 0.0                                       ! Get root water uptake depth GWRD
+    DO IZ = 1, NSOIL                                     ! Layer depth above which 95% of 
+       ETRANSUM = ETRANSUM + (ETRAN*ROOTACTIVITY(IZ))    ! root water uptake occurs
+       IF (ETRAN==0.0) THEN
+          GWRD = 1
+          EXIT
+       ELSE IF ((ETRANSUM/ETRAN) .ge. 0.95) THEN               
+          GWRD = MAX(IZ,1)                                
+          EXIT                                           
+       ELSE IF (IZ .EQ. NSOIL) THEN
+          GWRD = IZ
+       ENDIF                                             
     ENDDO
 
 #ifdef WRF_HYDRO

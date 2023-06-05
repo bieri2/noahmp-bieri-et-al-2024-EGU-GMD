@@ -1038,7 +1038,7 @@ CONTAINS
        end if
 
        ! update NROOT based on KROOT
-       !parameters%NROOT = KROOT 
+       parameters%NROOT = KROOT 
        ! Calculate soil parameters which vary with depth
        ! Use exponential relationship as in Miguez Macho and Fan (2012)
        DO K=1, NSOIL
@@ -1063,11 +1063,6 @@ CONTAINS
                                  /parameters%SMCMAX(K) 
 
        END DO
-
-         IF ((I==1) .AND. (J==54)) THEN
-           print*, parameters%SMCMAX, parameters%DKSAT, parameters%SMCWLT, parameters%PSISAT, &
-                   parameters%DWSAT , 'parameters'
-         END IF
 
 !=== hydrological processes for vegetation in urban model ===
 !=== irrigate vegetaion only in urban area, MAY-SEP, 9-11pm
