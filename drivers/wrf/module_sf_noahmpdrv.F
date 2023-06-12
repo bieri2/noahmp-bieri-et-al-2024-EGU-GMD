@@ -325,16 +325,16 @@ CONTAINS
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  CHUCXY    ! under canopy exchange coefficient 
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  CHV2XY    ! veg 2m exchange coefficient 
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  CHB2XY    ! bare 2m exchange coefficient
-! root water uptake variables 
-    REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  EASYXY    ! ease function [-]
-    REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  ROOTACTIVITYXY ! root activity function [-]
+! necessary for root scheme
+    REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  EASYXY    ! root scheme ease function [-]
+    REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  ROOTACTIVITYXY ! root activity function (0 - 1)
     REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  INACTIVEXY     ! number of timesteps with inactive roots [-]
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  KROOTXY   ! layer depth of root zone   [-]
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  KWTDXY    ! layer depth of water table [-]
     REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  PSIXY     ! soil matric potential [m]
-    INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  GWRDXY    ! root water uptake layer [-]
+    INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  GWRDXY    ! root water uptake depth [m]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  FDEPTHXY  ! e-folding depth of permeability decrease [m]
-    REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  BTRANIXY  ! beta factor [-]
+    REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  BTRANIXY  ! beta factor for soil moisture stress (0 - 1)
 ! additional output variables
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  PAHXY     ! precipitation advected heat 
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  PAHGXY    ! precipitation advected heat 
@@ -562,16 +562,16 @@ CONTAINS
     REAL                                :: CHUC         ! under canopy exchange coefficient 
     REAL                                :: CHV2         ! veg 2m exchange coefficient 
     REAL                                :: CHB2         ! bare 2m exchange coefficient
-! root water uptake variables
-    REAL, DIMENSION(1 : NSOIL)          :: EASY         ! ease function [-]
-    REAL, DIMENSION(1 : NSOIL)          :: ROOTACTIVITY ! root activity function [-]
+! necessary for root scheme
+    REAL, DIMENSION(1 : NSOIL)          :: EASY         ! root scheme ease function [-]
+    REAL, DIMENSION(1 : NSOIL)          :: ROOTACTIVITY ! root activity function (0 - 1)
     REAL, DIMENSION(1 : NSOIL)          :: INACTIVE     ! number of timesteps with inactive roots [-] 
     INTEGER                             :: KROOT        ! layer depth of root zone [-]
     INTEGER                             :: KWTD         ! layer depth of water table [-]
     REAL, DIMENSION(1 : NSOIL)          :: PSI          ! soil layer matric potential [m]
-    INTEGER                             :: GWRD         ! root water uptake layer [-]
+    INTEGER                             :: GWRD         ! root water uptake depth [m]
     REAL                                :: FDEPTH       ! e-folding depth of permeability decrease [m] 
-    REAL, DIMENSION(1 : NSOIL)          :: BTRANI       ! beta factor [-]
+    REAL, DIMENSION(1 : NSOIL)          :: BTRANI       ! beta factor for soil moisture stress (0 - 1)
 
     REAL                                :: QINTS
     REAL                                :: QINTR
@@ -656,12 +656,16 @@ CONTAINS
     REAL, DIMENSION( 1:nsoil ) :: CLAY
     REAL, DIMENSION( 1:nsoil ) :: ORGM
    
-    ! Needed to obtain varying soil properties with depth
+    ! Variables for calculating varying soil properties with depth
     REAL                                :: MID      
     REAL                                :: SMCMAXtop
     REAL                                :: PSISATtop
     REAL                                :: DKSATtop 
     REAL                                :: SMCWLTtop 
+
+    LOGICAL                             :: ROOT_UPDATE
+    REAL                                :: NDAYS
+    
     type(noahmp_parameters) :: parameters
 
 ! ----------------------------------------------------------------------
@@ -1037,8 +1041,21 @@ CONTAINS
          parameters%HSDAY  = HARVEST (I,J)
        end if
 
-       ! update NROOT based on KROOT
-       parameters%NROOT = KROOT 
+       ! update variables based on root scheme after one year
+       IF (ROOT_UPDATE==.FALSE.) THEN
+          NDAYS = DT*ITIMESTEP
+          IF (NDAYS .GT. 31536000.0) THEN 
+             ROOT_UPDATE=.TRUE.
+             print *,'ROOT_UPDATE set to TRUE'
+          ENDIF
+       ELSE
+          parameters%NROOT = KROOT  ! update NROOT based on KROOT
+       ENDIF
+
+       IF ((I==1) .AND. (J==1)) THEN
+         print*, NDAYS
+       ENDIF
+
        ! Calculate soil parameters which vary with depth
        ! Use exponential relationship as in Miguez Macho and Fan (2012)
        DO K=1, NSOIL
@@ -1259,8 +1276,8 @@ CONTAINS
             RAININ  , SNOWIN  , ACC_SSOIL, ACC_QINSUR, ACC_QSEVA      , & ! OUT :
             ACC_ETRANI, HCPCT , EFLXB   , CANHS   ,                     & ! OUT :
             ACC_DWATER, ACC_PRCP, ACC_ECAN, ACC_ETRAN, ACC_EDIR         & ! INOUT
-            ,EASY   , ROOTACTIVITY      , INACTIVE, KROOT   , KWTD      & ! IN/OUT : Root scheme 
-            ,PSI    , GWRD    , FDEPTH  ,ITIMESTEP, BTRANI              & ! IN/OUT : Root scheme 
+            ,EASY   , ROOTACTIVITY      , INACTIVE, KROOT   , KWTD      &   ! IN/OUT : Root scheme 
+            ,PSI    , GWRD    , FDEPTH  , BTRANI  , ROOT_UPDATE & ! IN/OUT : Root scheme 
 #ifdef WRF_HYDRO
             , sfcheadrt(i,j), WATBLED                                   &
 #endif
@@ -2043,11 +2060,11 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL, INTENT(IN) , OPTIONAL :: DT, WTDDT
 
 ! Extended soil column variables
-    INTEGER, INTENT(IN) :: ADDL_SOIL_LAYERS
-    REAL, DIMENSION(1:addl_soil_layers),                        INTENT(IN),    OPTIONAL :: ADDL_SOIL_DZ 
+    INTEGER, INTENT(IN) :: ADDL_SOIL_LAYERS                     ! number of additional soil layers
+    REAL, DIMENSION(1:addl_soil_layers),                        INTENT(IN),    OPTIONAL :: ADDL_SOIL_DZ ! thickness of added layers
     REAL, DIMENSION(1:nsoil+addl_soil_layers),                  INTENT(INOUT), OPTIONAL :: DEEPDZS
     REAL, DIMENSION(ims:ime,-2:nsoil+addl_soil_layers,jms:jme), INTENT(INOUT), OPTIONAL :: DEEPZSNSOXY 
-    REAL, DIMENSION(ims:ime,1:nsoil+addl_soil_layers,jms:jme),  INTENT(INOUT), OPTIONAL :: DEEPTSLB
+    REAL, DIMENSION(ims:ime, 1:nsoil+addl_soil_layers,jms:jme), INTENT(INOUT), OPTIONAL :: DEEPTSLB
 
 !jref:start
     REAL, DIMENSION(ims:ime,jms:jme), INTENT(INOUT) :: t2mvxy        !2m temperature vegetation part (k)
@@ -2060,9 +2077,11 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL, DIMENSION(1:NSOIL)  :: ZSOIL      ! Depth of the soil layer bottom (m) from 
     !                                                   the surface (negative)
 
-    REAL, DIMENSION(1:NSOIL+ADDL_SOIL_LAYERS) :: DEEPZSOIL ! Root scheme
+    ! Necessary for initializing additional soil layers
+    REAL, DIMENSION(1:NSOIL+ADDL_SOIL_LAYERS) :: DEEPZSOIL 
     INTEGER                                   :: DEEPNSOIL                
     REAL                                      :: DEPTH    
+    REAL, PARAMETER                           :: DEEPBOT = -20.0
     REAL                      :: BEXP, SMCMAX, PSISAT
     REAL                      :: FK, masslai,masssai
     
@@ -2081,6 +2100,9 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     character(len=4)  :: MMINSL
     character(len=*), intent(in) :: MMINLU
     MMINSL='STAS'
+
+    DEEPDZS(1:NSOIL)          = DZS                        ! Transfer old soil layer thicknesses to extended version
+    DEEPDZS(NSOIL+1:)         = ADDL_SOIL_DZ               ! Fill in extended column layer thicknesses 
 
     call read_mp_veg_parameters(trim(MMINLU))
     call read_mp_soil_parameters()
@@ -2377,17 +2399,14 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
             &           NSOIL , zsoil , snow , tgxy , snowh ,     &
             &           zsnsoxy , tsnoxy , snicexy , snliqxy , isnowxy )
 
-
        ! soil temp initialization for deep soil layers  --------------------------------------
        IF (PRESENT(DEEPTSLB)      .AND. &     
            PRESENT(DEEPDZS)       .AND. &
            PRESENT(DEEPZSNSOXY)   .AND. &
            PRESENT(ADDL_SOIL_DZ)) THEN
          DEEPTSLB(:,1:NSOIL,:)     = TSLB              ! Transfer old variables to extended ones
-         DEEPDZS(1:NSOIL)          = DZS
-         DEEPDZS(NSOIL+1:)         = ADDL_SOIL_DZ
          DEEPZSNSOXY(:,-2:NSOIL,:) = ZSNSOXY
-         DEEPNSOIL = NSOIL + ADDL_SOIL_LAYERS          ! Calculate new NSOIL
+         DEEPNSOIL                 = NSOIL + ADDL_SOIL_LAYERS   ! Calculate new NSOIL
          ! Interpolate temperature values for extended layers
          DO J = jts, jtf
           DO I = its, itf
@@ -2398,8 +2417,8 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
                DEPTH = DEPTH - DEEPDZS(NS)
              ENDIF
              DEEPZSNSOXY(I,NS,J) = DEPTH               ! Layer depths for extended column
-             DEEPTSLB(I,NS,J)    = DEEPTSLB(I,4,J)+ &  ! Interpolate deep soil temperature values 
-                                   ((DEPTH-ZSOIL(4))*((TMN(I,J)-TSLB(I,4,J))/(-20.0-ZSOIL(4))))
+             DEEPTSLB(I,NS,J)    = DEEPTSLB(I,NSOIL,J)+ &  ! Interpolate deep soil temperature values 
+                                   ((DEPTH-ZSOIL(NSOIL))*((TMN(I,J)-TSLB(I,NSOIL,J))/(DEEPBOT-ZSOIL(NSOIL))))
            ENDDO
           ENDDO
          ENDDO
@@ -2587,7 +2606,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     TYPE(domain) , TARGET :: grid                             ! state
     INTEGER, INTENT(INOUT)                           :: NSOIL
     REAL,   INTENT(IN)                               ::     WTDDT
-    INTEGER, INTENT(IN)                              :: ADDL_SOIL_LAYERS  ! Extended column
+    INTEGER, INTENT(IN)                              :: ADDL_SOIL_LAYERS  ! Number of additional soil layers
     REAL,    INTENT(IN), DIMENSION(1:NSOIL+ADDL_SOIL_LAYERS) :: DZS
     INTEGER, INTENT(IN), DIMENSION(ims:ime, jms:jme) :: ISLTYP, IVGTYP
     REAL,    INTENT(IN), DIMENSION(ims:ime, jms:jme) :: FDEPTH, TOPO , AREA
@@ -2610,21 +2629,21 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
                                                            QSPRINGXY
 
     ! Extended soil column variables                                                 
-    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS,jms:jme) :: DEEPSMOIS   
-    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS,jms:jme) :: DEEPSH2O    
-    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS,jms:jme) :: DEEPSMOISEQ 
-    REAL,    INTENT(IN),    DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS,jms:jme) :: TSLB  
+    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: DEEPSMOIS   
+    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: DEEPSH2O    
+    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: DEEPSMOISEQ 
+    REAL,    INTENT(IN),    DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: TSLB  
 ! local
     INTEGER  :: I,J,K,ITER,itf,jtf, NITER, NCOUNT,NS
-    REAL :: BEXP!,SMCMAX,PSISAT,SMCWLT,DWSAT,DKSAT
-    REAL :: FRLIQ,SMCEQDEEP,SMCMAXDEEP,DKSATDEEP,PSISATDEEP ! Deep soil parameters
+    REAL :: BEXP
+    REAL :: FRLIQ,SMCEQDEEP,SMCMAXDEEP,DKSATDEEP,PSISATDEEP ! Soil parameters for deep variably thick layer
     REAL :: SMCBELOW, FK, mid ! Needed to initialize deep soil layers
+    LOGICAL                   :: FILLLAYERS
+    REAL, PARAMETER           :: intdepth = -22.5   ! Depth used to calculate soil parameters
+                                                    ! for deep variably thick layer
     REAL, PARAMETER           :: HLICE = 3.335E5 
     REAL, PARAMETER           :: GRAV  = 9.81     
     REAL, PARAMETER           :: T0    = 273.15     
-    LOGICAL                   :: FILLLAYERS 
-    REAL, PARAMETER           :: intdepth = -22.5   ! Depth used to calculate soil parameters
-                                                    ! for MMF variably thick layer
     REAL :: DELTAT,RCOND,TOTWATER
     REAL :: AA,BBB,BB,CC,DD,DX,FUNC,DFUNC,DDZ,EXPON,SMC,FLUX
     REAL,      DIMENSION(1:NSOIL)               :: SMCEQ
@@ -2633,7 +2652,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     INTEGER,   DIMENSION( ims:ime, jms:jme )    :: LANDMASK !-1 for water (ice or no ice) and glacial areas, 1 for land where the LSM does its soil moisture calculations
     logical :: urbanpt_flag ! added to identify urban pixels by accounting for LCZ
 
-    DEEPSMOIS(:,1:NSOIL,:)   = SMOIS  ! Transfer to extended arrays
+    DEEPSMOIS(:,1:NSOIL,:)   = SMOIS    ! Transfer original arrays to deep arrays
     DEEPSH2O (:,1:NSOIL,:)   = SH2O        
     NSOIL = NSOIL + ADDL_SOIL_LAYERS    ! Define new NSOIL
 
@@ -2779,8 +2798,6 @@ EQWTD=WTD
        DO J = jts,jtf
           DO I = its,itf
              BEXP   =   BEXP_TABLE(ISLTYP(I,J))
-             !SMCMAX = SMCMAX_TABLE(ISLTYP(I,J))
-             !SMCWLT = SMCWLT_TABLE(ISLTYP(I,J))
 
              ! Calculate soil parameters which vary with depth
              ! Use exponential relationship as in Miguez Macho and Fan (2012)
@@ -2802,6 +2819,7 @@ EQWTD=WTD
 
              END DO 
 
+             ! For deep variably thick layer
              PSISATDEEP  = -PSISAT_TABLE(ISLTYP(I,J)) * min(max(exp(-(intdepth+1.5)/FDEPTH(I,J)),1.),  10.) 
              SMCMAXDEEP  = SMCMAX_TABLE(ISLTYP(I,J))  * max(min(exp((intdepth+1.5)/FDEPTH(I,J)),1.), 0.1) 
              DKSATDEEP   = DKSAT_TABLE(ISLTYP(I,J))   * max(min(exp((intdepth+1.5)/FDEPTH(I,J)),1.), 0.1) 
@@ -2819,16 +2837,10 @@ EQWTD=WTD
                  SMCMAX = 0.45         
                  SMCWLT = 0.40         
              ENDIF 
-             !DWSAT  =   DWSAT_TABLE(ISLTYP(I,J))
-             !DKSAT  =   DKSAT_TABLE(ISLTYP(I,J))
-             !PSISAT = -PSISAT_TABLE(ISLTYP(I,J))
            IF ( ( BEXP > 0.0 ) .AND. ( smcmax(1) > 0.0 ) .AND. ( -psisat(1) > 0.0 ) ) THEN
              !initialize equilibrium soil moisture for water table diagnostic
                     CALL EQSMOISTURE(NSOIL ,  ZSOIL , SMCMAX , SMCWLT ,DWSAT, DKSAT  ,BEXP  , SMCMAXDEEP, & !in
                                      DEEPSMOISEQ(I,:,J)         )  !out
-
-!             SMOISEQ (I,1:NSOIL,J) = SMCEQ (1:NSOIL)
-
 
               !make sure that below the water table the layers are saturated and initialize the deep soil moisture
              IF(WTD(I,J) < ZSOIL(NSOIL)-DZS(NSOIL)) THEN
@@ -2863,16 +2875,14 @@ EQWTD=WTD
 !                  SMCEQDEEP = MAX(SMCEQDEEP,SMCWLT)
                   SMCEQDEEP = MAX(SMCEQDEEP,1.E-4)
                   SMCWTDXY(I,J) = SMCMAXDEEP * ((WTD(I,J) -  (ZSOIL(NSOIL)-DZS(NSOIL)))/DZS(NSOIL)) + &
-                                  SMCEQDEEP * ((ZSOIL(NSOIL) - WTD(I,J))/DZS(NSOIL))!Change differences to be
-                                                                                    !relative to avoid bad values
+                                  SMCEQDEEP * ((ZSOIL(NSOIL) - WTD(I,J))/DZS(NSOIL))
+                                                                         
 
              ELSE !water table within the resolved layers
                   SMCWTDXY(I,J) = SMCMAXDEEP
                   DO K=NSOIL,2,-1
                      IF(WTD(I,J) .GE. ZSOIL(K-1))THEN
-                          !FRLIQ = SH2O(I,K,J) / SMOIS(I,K,J) ! Move later
                           DEEPSMOIS(I,K,J) = SMCMAX(K)
-                          !SH2O(I,K,J) = SMCMAX * FRLIQ       ! Move later
                      ELSE IF (K .LE. 4) THEN
                           IF(DEEPSMOIS(I,K,J).LT.DEEPSMOISEQ(I,K,J))THEN
                               WTD(I,J) = ZSOIL(K)
@@ -2912,7 +2922,7 @@ EQWTD=WTD
                     SMC = 0.5 * SMCMAX(K)
                    ! Newton-Raphson iteration assuming vertical flux = 0
                     DO ITER = 1, 100
-                      FUNC  = (SMC - SMCBELOW) * AA + BB * SMC ** EXPON
+                      FUNC  = (SMC - SMCBELOW) * AA + BB * SMC ** EXPON ! Original expression 
                       DFUNC = AA + BB * EXPON * SMC ** BEXP  ! Derivative of FUNC
                       DX  = FUNC / DFUNC   ! Calculate increment of X
                       SMC = SMC - DX       ! Get new value for SMC
@@ -2944,7 +2954,7 @@ EQWTD=WTD
                         SMCBELOW = DEEPSMOIS(I, NS+1 , J)
                         SMC = 0.5 * SMCMAX(K) ! First guess
                         DO ITER = 1, 100
-                          FUNC  = (SMC - SMCBELOW) * AA +  BB * SMC ** EXPON
+                          FUNC  = (SMC - SMCBELOW) * AA +  BB * SMC ** EXPON ! Original expression
                           DFUNC = AA + BB * EXPON * SMC ** BEXP ! Derivative of FUNC
                           DX  = FUNC/DFUNC ! Calculate increment of X
                           SMC = SMC - DX   ! Get new value for SMC
@@ -3048,7 +3058,7 @@ EQWTD=WTD
             SMC = 0.5 * SMCMAXK
 
          DO ITER  = 1, 100
-            FUNC  = (SMC - SMCMAXB) * AA +  BB * SMC ** EXPON
+            FUNC  = (SMC - SMCMAXB) * AA +  BB * SMC ** EXPON ! Original expression
             DFUNC = AA + BB * EXPON * SMC ** BEXP   ! Derivative of FUNC
 
             DX = FUNC/DFUNC         ! Calculate increment of X
