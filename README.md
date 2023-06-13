@@ -1,5 +1,3 @@
-# Noah-MP version 4.5 release
+# Root-Noah-MP 
 
-
-This is the official Noah-MP code version 4.5 consistent with that released in WRF v4.5. Note that WRF v4.5 GitHub code is directly connected to this Noah-MP GitHub through the submodule mechanism. 
-
+This branch includes Noah-MP version 4.5 with a dynamic root scheme that simulates deep root water uptake. See [Fan et al. (2017)](https://doi.org/10.1073/pnas.1712381114) for details on the root scheme. This version of the model also includes additional resolved soil layers and soil properties which vary with depth according to an exponential decay model ([Miguez-Macho and Fan 2012](https://doi.org/10.1029/2012JD017539)). 
