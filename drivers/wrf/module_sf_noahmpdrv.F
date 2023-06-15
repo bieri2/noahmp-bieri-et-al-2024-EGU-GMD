@@ -1041,19 +1041,13 @@ CONTAINS
          parameters%HSDAY  = HARVEST (I,J)
        end if
 
+       NDAYS = DT*ITIMESTEP
        ! update variables based on root scheme after one year
-       IF (ROOT_UPDATE==.FALSE.) THEN
-          NDAYS = DT*ITIMESTEP
-          IF (NDAYS .GT. 31536000.0) THEN 
-             ROOT_UPDATE=.TRUE.
-             print *,'ROOT_UPDATE set to TRUE'
-          ENDIF
-       ELSE
+       IF (NDAYS .GT. 31536000.0) THEN 
+          ROOT_UPDATE=.TRUE.
           parameters%NROOT = KROOT  ! update NROOT based on KROOT
-       ENDIF
-
-       IF ((I==1) .AND. (J==1)) THEN
-         print*, NDAYS
+       ELSE
+          ROOT_UPDATE=.FALSE.
        ENDIF
 
        ! Calculate soil parameters which vary with depth
