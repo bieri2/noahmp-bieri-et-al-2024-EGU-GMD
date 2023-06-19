@@ -196,6 +196,10 @@ MODULE MODULE_SF_NOAHMPLSM
                       ! **0 -> No tile drainage
                       !   1 -> on (simple scheme)
                       !   2 -> on (Hooghoudt's scheme)
+   
+  INTEGER :: OPT_ROOT ! dynamic rooting depth scheme (Fan et al. 2017)
+                      !   1 -> on  
+                      !   2 -> off
 
 !------------------------------------------------------------------------------------------!
 ! Physical Constants:                                                                      !
@@ -2221,79 +2225,82 @@ ENDIF   ! CROPTYPE == 0
 
      ! Root water uptake scheme (Fan et al. 2017) ------------------------------------------------
 
-     ! Determine layer where water table is located, if within resolved soil layers
-       DO IZ = 1, NSOIL
-         if(ZWT .gt. ZSOIL(IZ))exit
-       END DO
-       KWTD = MIN(IZ,NSOIL)
-       IWTD = IZ-1          ! Layer above water table
+       IF (OPT_ROOT == 2) THEN
+       ! Determine layer where water table is located, if within resolved soil layers
+         DO IZ = 1, NSOIL
+           if(ZWT .gt. ZSOIL(IZ))exit
+         END DO
+         KWTD = MIN(IZ,NSOIL)
+         IWTD = IZ-1          ! Layer above water table
 
-     ! Adjust layer thickness accordingly
-       DZSROOT       = DZSNSO(1:NSOIL)
-       DZSROOT(KWTD) = -1*(ZWT-ZSOIL(IWTD))
+       ! Adjust layer thickness accordingly
+         DZSROOT       = DZSNSO(1:NSOIL)
+         DZSROOT(KWTD) = -1*(ZWT-ZSOIL(IWTD))
 
-     ! Determine layers with active roots - depth of root zone
-       INACTIVEDAYS(1:NSOIL) = INACTIVE(1:NSOIL)*DT ! Convert # of inactive timesteps to inactive days (in seconds)
-       DO IZ = 1, NSOIL
-        if(INACTIVEDAYS(IZ) .gt. MAXINACTIVEDAYS)exit
-       END DO
-       KROOT = MIN(IZ-1,NSOIL)        ! Bottom layer of root zone
+       ! Determine layers with active roots - depth of root zone
+         INACTIVEDAYS(1:NSOIL) = INACTIVE(1:NSOIL)*DT ! Convert # of inactive timesteps to inactive days (in seconds)
+         DO IZ = 1, NSOIL
+          if(INACTIVEDAYS(IZ) .gt. MAXINACTIVEDAYS)exit
+         END DO
+         KROOT = MIN(IZ-1,NSOIL)        ! Bottom layer of root zone
 
-       HCAN  = parameters%HVT*(2./3.) ! Canopy height
+         HCAN  = parameters%HVT*(2./3.) ! Canopy height
 
-       ! Start calculation of ease function and root activity
-       DO IZ = 1, MIN(KROOT, KWTD)
-         IF (IZ==1) THEN            ! Get layer midpoints
-           MID = -0.05
-         ELSE
-           MID =  0.5 * (ZSOIL(IZ-1) + ZSOIL(IZ))
-         ENDIF
+         ! Start calculation of ease function and root activity
+         DO IZ = 1, MIN(KROOT, KWTD)
+           IF (IZ==1) THEN            ! Get layer midpoints
+             MID = -0.05
+           ELSE
+             MID =  0.5 * (ZSOIL(IZ-1) + ZSOIL(IZ))
+           ENDIF
 
          ! Calculate PSI
-         PSIZ(IZ) = MAX(PSIWLT,-parameters%PSISAT(IZ)*(MAX(0.01,SH2O(IZ))/parameters%SMCMAX(IZ))**(-parameters%BEXP(IZ)) )
+           PSIZ(IZ) = MAX(PSIWLT,-parameters%PSISAT(IZ)*(MAX(0.01,SH2O(IZ))/parameters%SMCMAX(IZ))**(-parameters%BEXP(IZ)) )
 
-         if(INACTIVEDAYS(IZ).le.MAXINACTIVEDAYS) ROOTMASK(IZ) = 1    ! Set root mask accordingly
+           if(INACTIVEDAYS(IZ).le.MAXINACTIVEDAYS) ROOTMASK(IZ) = 1    ! Set root mask accordingly
 
          ! Account for frozen soil
-         IF(ICE.eq.0) THEN
-           SOILFACTOR = 1.
-         ELSE
-           SOILFACTOR = 0.
-         ENDIF
+           IF(ICE.eq.0) THEN
+             SOILFACTOR = 1.
+           ELSE
+             SOILFACTOR = 0.
+           ENDIF
 
          ! Calculate ease function
-         EASY(IZ) = MAX(-( PSIWLT - PSIZ(IZ) )*SOILFACTOR / ( HCAN-MID ), 0.)
-       END DO
+           EASY(IZ) = MAX(-( PSIWLT - PSIZ(IZ) )*SOILFACTOR / ( HCAN-MID ), 0.)
+         END DO
 
-       !to grow roots anew, the layer has to be easiest to get water from than the
-       !current active layers with roots
-       MAXEASY = MAXVAL(EASY, ROOTMASK == 1)
+         !to grow roots anew, the layer has to be easiest to get water from than the
+         !current active layers with roots
+         MAXEASY = MAXVAL(EASY, ROOTMASK == 1)
 
-       !eliminate small root activity
-       WHERE(EASY .lt. 0.001*MAXEASY) EASY = 0.
+         !eliminate small root activity
+         WHERE(EASY .lt. 0.001*MAXEASY) EASY = 0.
 
-       DO IZ = 1, KROOT
-         if(INACTIVEDAYS(IZ) .gt. MAXINACTIVEDAYS .and. EASY(IZ) .lt. MAXEASY) EASY(IZ) = 0.
-       ENDDO
+         DO IZ = 1, KROOT
+           if(INACTIVEDAYS(IZ) .gt. MAXINACTIVEDAYS .and. EASY(IZ) .lt. MAXEASY) EASY(IZ) = 0.
+         ENDDO
 
-       ! Calculate root activity
-       TOTEASY = SUM(EASY*DZSROOT(1:NSOIL))
-       IF(TOTEASY .eq. 0.)THEN
-         ROOTACTIVITY = 0.
-       ELSE
-         ROOTACTIVITY = MIN(MAX((EASY*DZSROOT(1:NSOIL)) / TOTEASY , 0. ), 1. )
-       ENDIF
-
-       ! Increment or restart inactive timestep count based on root activity
-       DO IZ = 1, NSOIL
-         IF(EASY(IZ) .eq. 0.)THEN
-           INACTIVE(IZ) = INACTIVE(IZ) + 1
+         ! Calculate root activity
+         TOTEASY = SUM(EASY*DZSROOT(1:NSOIL))
+         IF(TOTEASY .eq. 0.)THEN
+           ROOTACTIVITY = 0.
          ELSE
-           INACTIVE(IZ) = 0
+           ROOTACTIVITY = MIN(MAX((EASY*DZSROOT(1:NSOIL)) / TOTEASY , 0. ), 1. )
          ENDIF
-       ENDDO
 
-       INACTIVEDAYS = MIN(INACTIVEDAYS,MAXINACTIVEDAYS+1)
+         ! Increment or restart inactive timestep count based on root activity
+         DO IZ = 1, NSOIL
+           IF(EASY(IZ) .eq. 0.)THEN
+             INACTIVE(IZ) = INACTIVE(IZ) + 1
+           ELSE
+             INACTIVE(IZ) = 0
+           ENDIF
+         ENDDO
+
+         INACTIVEDAYS = MIN(INACTIVEDAYS,MAXINACTIVEDAYS+1)
+    
+       ENDIF
 
      ! /CB - end of roots ---------------------------------------------------------
 
@@ -6305,28 +6312,34 @@ ENDIF   ! CROPTYPE == 0
 
     QSEVA  = QSEVA * 0.001 
 
-    DO IZ = 1, parameters%NROOT
-       IF (ROOT_UPDATE==.FALSE.) THEN                    ! If model running for less than 1yr,
-          ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001        ! use beta in ETRANI calculation
-       ELSE                                              
-          ETRANI(IZ) = ETRAN * ROOTACTIVITY(IZ) * 0.001  ! Use root activity instead of beta 
-       END IF                                            ! if model running for at least 1yr
-    ENDDO
+    IF (OPT_ROOT == 1) THEN
+      DO IZ = 1, parameters%NROOT
+            ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001        ! use beta in ETRANI calculation
+      ENDDO
+    ELSE
+      DO IZ = 1, parameters%NROOT
+         IF (ROOT_UPDATE==.FALSE.) THEN                    ! If model running for less than 1yr,
+            ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001        ! use beta in ETRANI calculation
+         ELSE                                              
+            ETRANI(IZ) = ETRAN * ROOTACTIVITY(IZ) * 0.001  ! Use root activity instead of beta 
+         END IF                                            ! if model running for at least 1yr
+      ENDDO
 
-    IF (ROOT_UPDATE==.TRUE.) THEN
-       ETRANSUM = 0.0                                       ! Get root water uptake depth GWRD
-       DO IZ = 1, NSOIL                                     ! Depth above which 95% of 
-          ETRANSUM = ETRANSUM + (ETRAN*ROOTACTIVITY(IZ))    ! root water uptake occurs
-          IF (ETRAN==0.0) THEN                              ! If ETRAN is 0, then GWRD is set to first layer
-             GWRD = 1                                       ! and loop exits
-             EXIT                                       
-          ELSE IF ((ETRANSUM/ETRAN) .ge. 0.95) THEN         ! If reached layer where 95% of uptake has    
-             GWRD = MAX(IZ,1)                               ! occurred, save layer depth as root water uptake 
-             EXIT                                           ! depth GWRD and exit loop
-          ELSE IF (IZ .EQ. NSOIL) THEN                      ! If reached bottom of resolved soil layers, set
-             GWRD = IZ                                      ! GWRD to depth of bottom layer
-          ENDIF                                             
-       ENDDO
+      IF (ROOT_UPDATE==.TRUE.) THEN
+         ETRANSUM = 0.0                                       ! Get root water uptake depth GWRD
+         DO IZ = 1, NSOIL                                     ! Depth above which 95% of 
+            ETRANSUM = ETRANSUM + (ETRAN*ROOTACTIVITY(IZ))    ! root water uptake occurs
+            IF (ETRAN==0.0) THEN                              ! If ETRAN is 0, then GWRD is set to first layer
+               GWRD = 1                                       ! and loop exits
+               EXIT                                       
+            ELSE IF ((ETRANSUM/ETRAN) .ge. 0.95) THEN         ! If reached layer where 95% of uptake has    
+               GWRD = MAX(IZ,1)                               ! occurred, save layer depth as root water uptake 
+               EXIT                                           ! depth GWRD and exit loop
+            ELSE IF (IZ .EQ. NSOIL) THEN                      ! If reached bottom of resolved soil layers, set
+               GWRD = IZ                                      ! GWRD to depth of bottom layer
+            ENDIF                                             
+         ENDDO
+      ENDIF
     ENDIF
 
 #ifdef WRF_HYDRO
@@ -11190,7 +11203,7 @@ END SUBROUTINE EMERG
   subroutine noahmp_options( idveg    ,iopt_crs  ,iopt_btr  ,iopt_run  ,iopt_sfc  ,iopt_frz , & 
                              iopt_inf ,iopt_rad  ,iopt_alb  ,iopt_snf  ,iopt_tbot ,iopt_stc , &
 			     iopt_rsf ,iopt_soil ,iopt_pedo ,iopt_crop ,iopt_irr  ,iopt_irrm, &
-                             iopt_infdv, iopt_tdrn)
+                             iopt_infdv, iopt_tdrn, iopt_root)
 
   implicit none
 
@@ -11222,6 +11235,8 @@ END SUBROUTINE EMERG
                                     ! 3 -> flood irrigation ON
   INTEGER,  INTENT(IN) :: iopt_infdv!infiltration options for dynamic VIC (1->Philip; 2-> Green-Ampt;3->Smith-Parlange)
   INTEGER,  INTENT(IN) :: iopt_tdrn !tile drainage (0->none; 1-> simple 2->Hooghoudt's)
+  INTEGER,  INTENT(IN) :: iopt_root !dynamic rooting depth scheme (Fan et al. 2017) (1 -> off ; 2 -> on)
+
 ! -------------------------------------------------------------------------------------------------
 
   dveg = idveg
@@ -11245,6 +11260,7 @@ END SUBROUTINE EMERG
   opt_irrm = iopt_irrm
   opt_infdv= iopt_infdv
   opt_tdrn = iopt_tdrn
+  opt_root = iopt_root
  
   end subroutine noahmp_options
  

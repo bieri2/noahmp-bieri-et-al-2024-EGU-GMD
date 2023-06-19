@@ -17,7 +17,7 @@ CONTAINS
                  IDVEG, IOPT_CRS,  IOPT_BTR, IOPT_RUN, IOPT_SFC, IOPT_FRZ,  & ! IN : User options
               IOPT_INF, IOPT_RAD,  IOPT_ALB, IOPT_SNF,IOPT_TBOT, IOPT_STC,  & ! IN : User options
               IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,IOPT_CROP, IOPT_IRR,  & ! IN : User options
-             IOPT_IRRM, IOPT_INFDV, IOPT_TDRN,soiltstep,                    & ! IN : User options                 
+             IOPT_IRRM, IOPT_INFDV, IOPT_TDRN, IOPT_ROOT, soiltstep,        & ! IN : User options                 
               IZ0TLND, SF_URBAN_PHYSICS,                                    & ! IN : User options
 	      SOILCOMP,  SOILCL1,  SOILCL2,   SOILCL3,  SOILCL4,            & ! IN : User options
                    T3D,     QV3D,     U_PHY,    V_PHY,   SWDOWN,     SWDDIR,&
@@ -129,6 +129,7 @@ CONTAINS
     INTEGER,                                         INTENT(IN   ) ::  IOPT_IRRM ! irrigation method
     INTEGER,                                         INTENT(IN   ) ::  IOPT_INFDV! infiltration options for dynamic VIC infiltration (1->Philip; 2-> Green-Ampt;3->Smith-Parlange)
     INTEGER,                                         INTENT(IN   ) ::  IOPT_TDRN ! tile drainage (0-> no tile drainage; 1-> simple tile drainage;2->Hooghoudt's)
+    INTEGER,                                         INTENT(IN   ) ::  IOPT_ROOT ! dynamic rooting depth scheme (Fan et al. 2017) (1->off ; 2-> on)
     REAL,                                            INTENT(IN   ) ::  soiltstep ! soil timestep (s), default:0->same as main model timestep
     INTEGER,                                         INTENT(IN   ) ::  IZ0TLND   ! option of Chen adjustment of Czil (not used)
     INTEGER,                                         INTENT(IN   ) ::  sf_urban_physics   ! urban physics option
@@ -673,7 +674,7 @@ CONTAINS
     CALL NOAHMP_OPTIONS(IDVEG  ,IOPT_CRS  ,IOPT_BTR  ,IOPT_RUN  ,IOPT_SFC  ,IOPT_FRZ , &
                 IOPT_INF  ,IOPT_RAD  ,IOPT_ALB  ,IOPT_SNF  ,IOPT_TBOT, IOPT_STC  ,     &
 		IOPT_RSF  ,IOPT_SOIL ,IOPT_PEDO ,IOPT_CROP ,IOPT_IRR , IOPT_IRRM ,     &
-                IOPT_INFDV,IOPT_TDRN )
+                IOPT_INFDV,IOPT_TDRN ,IOPT_ROOT)
 
     IPRINT    =  .false.                     ! debug printout
 
@@ -1041,14 +1042,16 @@ CONTAINS
          parameters%HSDAY  = HARVEST (I,J)
        end if
 
-       NDAYS = DT*ITIMESTEP
-       ! update variables based on root scheme after one year
-       IF (NDAYS .GT. 31536000.0) THEN 
-          ROOT_UPDATE=.TRUE.
-          parameters%NROOT = KROOT  ! update NROOT based on KROOT
-       ELSE
-          ROOT_UPDATE=.FALSE.
-       ENDIF
+       if(iopt_root == 2) then 
+          NDAYS = DT*ITIMESTEP
+          ! update variables based on root scheme after one year
+          if (NDAYS .GT. 31536000.0) then 
+             ROOT_UPDATE=.TRUE.
+             parameters%NROOT = KROOT  ! update NROOT based on KROOT
+          else
+             ROOT_UPDATE=.FALSE.
+          endif
+       endif
 
        ! Calculate soil parameters which vary with depth
        ! Use exponential relationship as in Miguez Macho and Fan (2012)
