@@ -905,7 +905,7 @@ CONTAINS
 
        end if 
 
-       SLOPETYP     = 1                               ! set underground runoff slope term
+       SLOPETYP     = 3                               ! set underground runoff slope term
        IST          = 1                               ! MP surface type: 1 = land; 2 = lake
        SOILCOLOR    = 4                               ! soil color: assuming a middle color category ?????????
 
@@ -974,6 +974,10 @@ CONTAINS
 
        CALL TRANSFER_MP_PARAMETERS(NSOIL,VEGTYP,SOILTYP,SLOPETYP,SOILCOLOR,CROPTYPE,parameters)
        
+       if ((I==31) .AND. (J==62)) then
+          print*, parameters%SLOPE, 'SLOPE parameter'
+       end if
+
        if(iopt_soil == 3 .and. .not. parameters%urban_flag) then
          
 	sand = 0.01 * soilcomp(i,1:nsoil,j)
