@@ -1913,7 +1913,6 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
  END SUBROUTINE PEDOTRANSFER_SR2006
 
   SUBROUTINE NOAHMP_INIT ( MMINLU, SNOW , SNOWH , CANWAT , ISLTYP ,   IVGTYP, XLAT, &
-       ADDL_SOIL_LAYERS, & 
        TSLB , SMOIS , SH2O , DZS , FNDSOILW , FNDSNOWH ,             &
        TSK, isnowxy , tvxy     ,tgxy     ,canicexy ,         TMN,     XICE,   &
        canliqxy ,eahxy    ,tahxy    ,cmxy     ,chxy     ,                     &
@@ -1938,8 +1937,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        wtddt    ,stepwtd  ,dt       ,qrfsxy     ,qspringsxy  , qslatxy    ,  &      ! Optional groundwater
        fdepthxy ,ht     ,riverbedxy ,eqzwt     ,rivercondxy ,pexpxy       ,  &      ! Optional groundwater
        rechclim,                                                             &      ! Optional groundwater
-       gecros_state,                                                         &      ! Optional gecros crop
-       DEEPTSLB, ADDL_SOIL_DZ, DEEPDZS, DEEPZSNSOXY)                                ! Extended column arrays
+       gecros_state)                                                                ! Optional gecros crop
 
   USE NOAHMP_TABLES
   use module_sf_gecros, only: seednc,sla0,slnmin,ffat,flig,foac,fmin,npl,seedw,eg,fcrsh,seednc,lnci,cfv
@@ -1959,13 +1957,13 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
          &                           allowed_to_read
     INTEGER, INTENT(IN)       ::     sf_urban_physics                              ! urban, by yizhou
 
-    REAL,    DIMENSION( NSOIL), INTENT(IN)    ::     DZS  ! Thickness of the soil layers [m]
+    REAL,    DIMENSION( 1:nsoil ), INTENT(IN)       ::     DZS  ! Thickness of the soil layers [m]
     REAL,    INTENT(IN) , OPTIONAL ::     DX, DY
     REAL,    DIMENSION( ims:ime, jms:jme ) ,  INTENT(IN) , OPTIONAL :: MSFTX,MSFTY
 
-    REAL,    DIMENSION( ims:ime, NSOIL, jms:jme ) ,    &
-         &   INTENT(INOUT)    ::     SMOIS,                      &
-         &                           SH2O,                       &
+    REAL,    DIMENSION(ims:ime,1:nsoil,jms:jme),                &
+         &   INTENT(INOUT)    ::     SMOIS,                     &
+         &                           SH2O,                      &
          &                           TSLB
 
     REAL,    DIMENSION( ims:ime, jms:jme ) ,                     &
@@ -1985,7 +1983,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL, DIMENSION(ims:ime,jms:jme), INTENT(INOUT) :: TMN         !deep soil temperature (k)
     REAL, DIMENSION(ims:ime,jms:jme), INTENT(IN) :: XICE         !sea ice fraction
     INTEGER, DIMENSION(ims:ime,jms:jme), INTENT(INOUT) :: isnowxy     !actual no. of snow layers
-    REAL, DIMENSION(ims:ime,-2:NSOIL,jms:jme), INTENT(INOUT) :: zsnsoxy  !snow layer depth [m]
+    REAL, DIMENSION(ims:ime,1:nsoil,jms:jme),            INTENT(INOUT) :: zsnsoxy  !snow layer depth [m]
     REAL, DIMENSION(ims:ime,-2:              0,jms:jme), INTENT(INOUT) :: tsnoxy   !snow temperature [K]
     REAL, DIMENSION(ims:ime,-2:              0,jms:jme), INTENT(INOUT) :: snicexy  !snow layer ice [mm]
     REAL, DIMENSION(ims:ime,-2:              0,jms:jme), INTENT(INOUT) :: snliqxy  !snow layer liquid water [mm]
@@ -2056,13 +2054,6 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     INTEGER,  INTENT(OUT) , OPTIONAL :: STEPWTD
     REAL, INTENT(IN) , OPTIONAL :: DT, WTDDT
 
-! Extended soil column variables
-    INTEGER, INTENT(IN) :: ADDL_SOIL_LAYERS                     ! number of additional soil layers
-    REAL, DIMENSION(1:addl_soil_layers),                        INTENT(IN),    OPTIONAL :: ADDL_SOIL_DZ ! thickness of added layers
-    REAL, DIMENSION(1:nsoil+addl_soil_layers),                  INTENT(INOUT), OPTIONAL :: DEEPDZS
-    REAL, DIMENSION(ims:ime,-2:nsoil+addl_soil_layers,jms:jme), INTENT(INOUT), OPTIONAL :: DEEPZSNSOXY 
-    REAL, DIMENSION(ims:ime, 1:nsoil+addl_soil_layers,jms:jme), INTENT(INOUT), OPTIONAL :: DEEPTSLB
-
 !jref:start
     REAL, DIMENSION(ims:ime,jms:jme), INTENT(INOUT) :: t2mvxy        !2m temperature vegetation part (k)
     REAL, DIMENSION(ims:ime,jms:jme), INTENT(INOUT) :: t2mbxy        !2m temperature bare ground part (k)
@@ -2074,11 +2065,6 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL, DIMENSION(1:NSOIL)  :: ZSOIL      ! Depth of the soil layer bottom (m) from 
     !                                                   the surface (negative)
 
-    ! Necessary for initializing additional soil layers
-    REAL, DIMENSION(1:NSOIL+ADDL_SOIL_LAYERS) :: DEEPZSOIL 
-    INTEGER                                   :: DEEPNSOIL                
-    REAL                                      :: DEPTH    
-    REAL, PARAMETER                           :: DEEPBOT = -20.0
     REAL                      :: BEXP, SMCMAX, PSISAT
     REAL                      :: FK, masslai,masssai
     
@@ -2093,13 +2079,12 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
 
     INTEGER                   :: errflag, i,j,itf,jtf,ns
 
+    INTEGER, PARAMETER        :: NSOIL_REDUCED = 4 ! Default NSOIL for configuration without deep soil layers
+
     character(len=240) :: err_message
     character(len=4)  :: MMINSL
     character(len=*), intent(in) :: MMINLU
     MMINSL='STAS'
-
-    DEEPDZS(1:NSOIL)          = DZS                        ! Transfer old soil layer thicknesses to extended version
-    DEEPDZS(NSOIL+1:)         = ADDL_SOIL_DZ               ! Fill in extended column layer thicknesses 
 
     call read_mp_veg_parameters(trim(MMINLU))
     call read_mp_soil_parameters()
@@ -2190,11 +2175,11 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
               SMCMAX = SMCMAX_TABLE(ISLTYP(I,J))
               PSISAT = PSISAT_TABLE(ISLTYP(I,J))
 
-              DO NS=1, NSOIL
+              DO NS=1, NSOIL_REDUCED
 	        IF ( SMOIS(I,NS,J) > SMCMAX )  SMOIS(I,NS,J) = SMCMAX
               END DO
               IF ( ( BEXP > 0.0 ) .AND. ( SMCMAX > 0.0 ) .AND. ( PSISAT > 0.0 ) ) THEN
-                DO NS=1, NSOIL
+                DO NS=1, NSOIL_REDUCED
                    IF ( TSLB(I,NS,J) < 273.149 ) THEN    ! Use explicit as initial soil ice
                       FK=(( (HLICE/(GRAV*(-PSISAT))) *                              &
                            ((TSLB(I,NS,J)-T0)/TSLB(I,NS,J)) )**(-1/BEXP) )*SMCMAX
@@ -2205,7 +2190,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
                    ENDIF
                 END DO
               ELSE
-                DO NS=1, NSOIL
+                DO NS=1, NSOIL_REDUCED
                    SH2O(I,NS,J)=SMOIS(I,NS,J)
                 END DO
               ENDIF
@@ -2397,29 +2382,16 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
             &           zsnsoxy , tsnoxy , snicexy , snliqxy , isnowxy )
 
        ! soil temp initialization for deep soil layers  --------------------------------------
-       IF (PRESENT(DEEPTSLB)      .AND. &     
-           PRESENT(DEEPDZS)       .AND. &
-           PRESENT(DEEPZSNSOXY)   .AND. &
-           PRESENT(ADDL_SOIL_DZ)) THEN
-         DEEPTSLB(:,1:NSOIL,:)     = TSLB              ! Transfer old variables to extended ones
-         DEEPZSNSOXY(:,-2:NSOIL,:) = ZSNSOXY
-         DEEPNSOIL                 = NSOIL + ADDL_SOIL_LAYERS   ! Calculate new NSOIL
          ! Interpolate temperature values for extended layers
          DO J = jts, jtf
           DO I = its, itf
-           DO NS = NSOIL+1, DEEPNSOIL
-             IF (NS .EQ. NSOIL+1) THEN                 ! Calculate depth from surface
-               DEPTH = ZSOIL(NS-1) - DEEPDZS(NS)
-             ELSE
-               DEPTH = DEPTH - DEEPDZS(NS)
-             ENDIF
-             DEEPZSNSOXY(I,NS,J) = DEPTH               ! Layer depths for extended column
-             DEEPTSLB(I,NS,J)    = DEEPTSLB(I,NSOIL,J)+ &  ! Interpolate deep soil temperature values 
-                                   ((DEPTH-ZSOIL(NSOIL))*((TMN(I,J)-TSLB(I,NSOIL,J))/(DEEPBOT-ZSOIL(NSOIL))))
+           DO NS = NSOIL_REDUCED+1, NSOIL
+             TSLB(I,NS,J) = TSLB(I,NSOIL_REDUCED,J) + &  ! Interpolate deep soil temperature values 
+                            ((ZSOIL(NS)-ZSOIL(NSOIL_REDUCED))*((TMN(I,J)-TSLB(I,NSOIL_REDUCED,J))/ &
+                             (ZSOIL(NSOIL)-ZSOIL(NSOIL_REDUCED))))
            ENDDO
           ENDDO
          ENDDO
-       ENDIF
 
        !initialize arrays for groundwater dynamics iopt_run=5
 
@@ -2572,7 +2544,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
             &            QLATXY, QSLATXY, QRFXY, QRFSXY, &
             &            DEEPRECHXY, RECHXY , QSPRINGXY, QSPRINGSXY, &
             &            rechclim  ,                                   &
-            &            DEEPSMOIS , DEEPSH2O, DEEPSMOISEQ, TSLB, ADDL_SOIL_LAYERS,    & ! Extended column variables
+            &            TSLB,                                         &
             &            ids,ide, jds,jde, kds,kde,                    &
             &            ims,ime, jms,jme, kms,kme,                    &
             &            ips,ipe, jps,jpe, kps,kpe,                    &
@@ -2603,15 +2575,14 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     TYPE(domain) , TARGET :: grid                             ! state
     INTEGER, INTENT(INOUT)                           :: NSOIL
     REAL,   INTENT(IN)                               ::     WTDDT
-    INTEGER, INTENT(IN)                              :: ADDL_SOIL_LAYERS  ! Number of additional soil layers
-    REAL,    INTENT(IN), DIMENSION(1:NSOIL+ADDL_SOIL_LAYERS) :: DZS
+    REAL,    INTENT(IN), DIMENSION(1:nsoil)          :: DZS
     INTEGER, INTENT(IN), DIMENSION(ims:ime, jms:jme) :: ISLTYP, IVGTYP
     REAL,    INTENT(IN), DIMENSION(ims:ime, jms:jme) :: FDEPTH, TOPO , AREA
     REAL,    INTENT(IN), DIMENSION(ims:ime, jms:jme) :: rechclim 
     REAL,    INTENT(OUT), DIMENSION(ims:ime, jms:jme) :: RIVERCOND
     REAL,    INTENT(INOUT), DIMENSION(ims:ime, jms:jme) :: WTD, RIVERBED, EQWTD, PEXP
-    REAL,     DIMENSION( ims:ime , 1:nsoil, jms:jme ), &
-         &    INTENT(INOUT)   ::                          SMOIS, &
+    REAL,    INTENT(INOUT), DIMENSION(ims:ime,1:nsoil,jms:jme) :: &
+         &                                                 SMOIS,&
          &                                                 SH2O, &
          &                                                 SMOISEQ
     REAL,    INTENT(INOUT), DIMENSION(ims:ime, jms:jme) ::  &
@@ -2626,10 +2597,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
                                                            QSPRINGXY
 
     ! Extended soil column variables                                                 
-    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: DEEPSMOIS   
-    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: DEEPSH2O    
-    REAL,    INTENT(INOUT), DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: DEEPSMOISEQ 
-    REAL,    INTENT(IN),    DIMENSION(ims:ime, 1:NSOIL+ADDL_SOIL_LAYERS, jms:jme) :: TSLB  
+    REAL,    INTENT(IN), DIMENSION(ims:ime, 1:nsoil, jms:jme) :: TSLB  
 ! local
     INTEGER  :: I,J,K,ITER,itf,jtf, NITER, NCOUNT,NS
     REAL :: BEXP
@@ -2644,14 +2612,11 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL :: DELTAT,RCOND,TOTWATER
     REAL :: AA,BBB,BB,CC,DD,DX,FUNC,DFUNC,DDZ,EXPON,SMC,FLUX
     REAL,      DIMENSION(1:NSOIL)               :: SMCEQ
-    REAL,      DIMENSION(1:NSOIL+ADDL_SOIL_LAYERS) :: ZSOIL,SMCMAX,PSISAT,SMCWLT,DWSAT,DKSAT
+    REAL,      DIMENSION(1:NSOIL)               :: ZSOIL,SMCMAX,PSISAT,SMCWLT,DWSAT,DKSAT
     REAL,      DIMENSION( ims:ime, jms:jme )    :: QLAT, QRF
     INTEGER,   DIMENSION( ims:ime, jms:jme )    :: LANDMASK !-1 for water (ice or no ice) and glacial areas, 1 for land where the LSM does its soil moisture calculations
+    INTEGER,   PARAMETER                        :: NSOIL_REDUCED = 4 ! Default NSOIL for configuration without deep soil layers
     logical :: urbanpt_flag ! added to identify urban pixels by accounting for LCZ
-
-    DEEPSMOIS(:,1:NSOIL,:)   = SMOIS    ! Transfer original arrays to deep arrays
-    DEEPSH2O (:,1:NSOIL,:)   = SH2O        
-    NSOIL = NSOIL + ADDL_SOIL_LAYERS    ! Define new NSOIL
 
        ! Given the soil layer thicknesses (in DZS), calculate the soil layer
        ! depths from the surface.
@@ -2837,7 +2802,10 @@ EQWTD=WTD
            IF ( ( BEXP > 0.0 ) .AND. ( smcmax(1) > 0.0 ) .AND. ( -psisat(1) > 0.0 ) ) THEN
              !initialize equilibrium soil moisture for water table diagnostic
                     CALL EQSMOISTURE(NSOIL ,  ZSOIL , SMCMAX , SMCWLT ,DWSAT, DKSAT  ,BEXP  , SMCMAXDEEP, & !in
-                                     DEEPSMOISEQ(I,:,J)         )  !out
+                                     SMCEQ                          )  !out
+
+             SMOISEQ (I,1:NSOIL,J) = SMCEQ (1:NSOIL)
+
 
               !make sure that below the water table the layers are saturated and initialize the deep soil moisture
              IF(WTD(I,J) < ZSOIL(NSOIL)-DZS(NSOIL)) THEN
@@ -2879,13 +2847,13 @@ EQWTD=WTD
                   SMCWTDXY(I,J) = SMCMAXDEEP
                   DO K=NSOIL,2,-1
                      IF(WTD(I,J) .GE. ZSOIL(K-1))THEN
-                          DEEPSMOIS(I,K,J) = SMCMAX(K)
-                     ELSE IF (K .LE. 4) THEN
-                          IF(DEEPSMOIS(I,K,J).LT.DEEPSMOISEQ(I,K,J))THEN
+                          SMOIS(I,K,J) = SMCMAX(K)
+                     ELSE IF (K .LE. NSOIL_REDUCED) THEN
+                          IF(SMOIS(I,K,J).LT.SMOISEQ(I,K,J))THEN
                               WTD(I,J) = ZSOIL(K)
                           ELSE
-                              WTD(I,J) = ( DEEPSMOIS(I,K,J)*DZS(K) - DEEPSMOISEQ(I,K,J)*ZSOIL(K-1) + SMCMAX(K)*ZSOIL(K) ) / &
-                                         (SMCMAX(K) - DEEPSMOISEQ(I,K,J))   
+                              WTD(I,J) = ( SMOIS(I,K,J)*DZS(K) - SMOISEQ(I,K,J)*ZSOIL(K-1) + SMCMAX(K)*ZSOIL(K) ) / &
+                                         (SMCMAX(K) - SMOISEQ(I,K,J))   
                           ENDIF
                           EXIT
                      ELSE
@@ -2896,7 +2864,7 @@ EQWTD=WTD
 
              ! Fill in SM where water table is below resolved soil layers
              IF (WTD(I,J) < ZSOIL(NSOIL)) THEN
-                 DO K = NSOIL,5,-1
+                 DO K = NSOIL,NSOIL_REDUCED+1,-1
 
                     ! Define DDZ
                     IF ( K < NSOIL ) THEN
@@ -2904,7 +2872,6 @@ EQWTD=WTD
                     ELSE
                        DDZ = ZSOIL(K-1) - ZSOIL(K)
                     ENDIF
-
                     ! Use Newton-Raphson method to define SM for each layer
                     ! Use Richard's equation for unsaturated flow
                     EXPON = BEXP + 1.
@@ -2925,30 +2892,30 @@ EQWTD=WTD
                       SMC = SMC - DX       ! Get new value for SMC
                       IF ( ABS (DX) < 1.E-6)EXIT  ! Exit once DX is sufficiently small
                     ENDDO
-                    DEEPSMOIS(I,K,J) = MAX(SMC,1.E-4)
+                    SMOIS(I,K,J) = MAX(SMC,1.E-4)
                  ENDDO
              ! Fill in SM where water table is within resolved soil layers
              ELSEIF (WTD(I,J) .GE. ZSOIL(NSOIL)) THEN 
-                DO K=NSOIL,5,-1
+                DO K=NSOIL,NSOIL_REDUCED+1,-1
                    FILLLAYERS = .FALSE.
                   ! Define SM for a layer if the WTD is in that layer or at
                   ! the bottom of that layer
                    IF ((WTD(I,J) .LT. ZSOIL(K-1)) .AND. (WTD(I,J) .GT. ZSOIL(K))) THEN
-                      DEEPSMOIS(I,K,J) = SMCMAX(K) * ((WTD(I,J) -  ZSOIL(K)) / DZS(K)) + &
-                                         DEEPSMOISEQ(I,K,J) * ((ZSOIL(K-1) - WTD(I,J)) / DZS(K))
+                      SMOIS(I,K,J) = SMCMAX(K) * ((WTD(I,J) -  ZSOIL(K)) / DZS(K)) + &
+                                     SMOISEQ(I,K,J) * ((ZSOIL(K-1) - WTD(I,J)) / DZS(K))
                       FILLLAYERS = .TRUE.
                    ELSEIF (WTD(I,J) .EQ. ZSOIL(K)) THEN
-                      DEEPSMOIS(I,K,J) = DEEPSMOISEQ(I,K,J)
+                      SMOIS(I,K,J) = SMOISEQ(I,K,J)
                       FILLLAYERS = .TRUE.
                    ENDIF
                    ! Fill in other layers if FILLAYERS = TRUE
-                   IF ((K .GT. 5) .AND. (FILLLAYERS .EQ. .TRUE.)) THEN
-                     DO NS = K-1,5,-1
+                   IF ((K .GT. NSOIL_REDUCED+1) .AND. (FILLLAYERS .EQ. .TRUE.)) THEN
+                     DO NS = K-1,NSOIL_REDUCED+1,-1
                         DDZ = ( ZSOIL(NS-1) - ZSOIL(NS+1) ) * 0.5
                         EXPON = BEXP + 1.       ! Define terms
                         AA    = DWSAT(K) / DDZ
                         BB    = DKSAT(K) / SMCMAX(K) ** EXPON
-                        SMCBELOW = DEEPSMOIS(I, NS+1 , J)
+                        SMCBELOW = SMOIS(I, NS+1 , J)
                         SMC = 0.5 * SMCMAX(K) ! First guess
                         DO ITER = 1, 100
                           FUNC  = (SMC - SMCBELOW) * AA +  BB * SMC ** EXPON ! Original expression
@@ -2957,32 +2924,32 @@ EQWTD=WTD
                           SMC = SMC - DX   ! Get new value for SMC
                           IF ( ABS (DX) < 1.E-6)EXIT ! Exit once X is sufficently small
                         ENDDO
-                        DEEPSMOIS(I,NS,J) = MAX(SMC,1E-4)
+                        SMOIS(I,NS,J) = MAX(SMC,1E-4)
                      ENDDO
                    ENDIF
                 ENDDO
              ENDIF
              ! Fill in values for SH2O based on SMC values
              DO K = NSOIL,2,-1
-                  IF(K .LE. 4)THEN
-                     IF(DEEPSMOIS(I,K,J) .EQ. SMCMAX(K))THEN
-                       FRLIQ = DEEPSH2O(I,K,J) / DEEPSMOIS(I,K,J)
-                       DEEPSH2O(I,K,J) = SMCMAX(K) * FRLIQ
+                  IF(K .LE. NSOIL_REDUCED)THEN
+                     IF(SMOIS(I,K,J) .EQ. SMCMAX(K))THEN
+                       FRLIQ = SH2O(I,K,J) / SMOIS(I,K,J)
+                       SH2O(I,K,J) = SMCMAX(K) * FRLIQ
                      ENDIF
                   ELSE
                      IF ( TSLB(I,K,J) < 273.149 ) THEN    ! Use explicit as initial soil ice
                        FK = (( (HLICE/(GRAV*(PSISAT(K)))) *                              &
                           ((TSLB(I,K,J)-T0)/TSLB(I,K,J)) )**(-1/BEXP) )*SMCMAX(K)
                        FK = MAX(FK, 0.02)
-                       DEEPSH2O(I,K,J) = MIN( FK, DEEPSMOIS(I,K,J) )
+                       SH2O(I,K,J) = MIN( FK, SMOIS(I,K,J) )
                      ELSE
-                       DEEPSH2O(I,K,J) = DEEPSMOIS(I,K,J)
+                       SH2O(I,K,J) = SMOIS(I,K,J)
                      ENDIF
                   ENDIF
              END DO
 
             ELSE
-              DEEPSMOISEQ (I,1:NSOIL,J) = SMCMAX
+              SMOISEQ (I,1:NSOIL,J) = SMCMAX
               SMCWTDXY(I,J) = SMCMAXDEEP
               WTD(I,J) = 0.0
             ENDIF
@@ -3000,9 +2967,6 @@ EQWTD=WTD
 
           ENDDO
        ENDDO
-
-
-
 
     END  SUBROUTINE GROUNDWATER_INIT
 ! ==================================================================================================
