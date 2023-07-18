@@ -71,7 +71,7 @@ CONTAINS
                its,ite,  jts,jte,  kts,kte,                    &
                ! Root water uptake scheme
                EASYXY, ROOTACTIVITYXY, INACTIVEXY, KROOTXY, KWTDXY, BTRANIXY, & 
-               PSIXY, GWRDXY, FDEPTHXY, &    
+               PSIXY , GWRDXY, FDEPTHXY, ROOT_UPDATE, &    
                MP_RAINC, MP_RAINNC, MP_SHCV, MP_SNOW, MP_GRAUP, MP_HAIL     )
 !----------------------------------------------------------------
     USE MODULE_SF_NOAHMPLSM
@@ -334,8 +334,9 @@ CONTAINS
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  KWTDXY    ! layer depth of water table [-]
     REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  PSIXY     ! soil matric potential [m]
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  GWRDXY    ! root water uptake depth [m]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  FDEPTHXY  ! e-folding depth of permeability decrease [m]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN)    ::  FDEPTHXY  ! e-folding depth of permeability decrease [m]
     REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  BTRANIXY  ! beta factor for soil moisture stress (0 - 1)
+    LOGICAL,                                         INTENT(INOUT) ::  ROOT_UPDATE    ! boolean value - when TRUE, update variables based on root scheme 
 ! additional output variables
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  PAHXY     ! precipitation advected heat 
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  PAHGXY    ! precipitation advected heat 
@@ -664,7 +665,6 @@ CONTAINS
     REAL                                :: DKSATtop 
     REAL                                :: SMCWLTtop 
 
-    LOGICAL                             :: ROOT_UPDATE
     REAL                                :: NDAYS
     
     type(noahmp_parameters) :: parameters
