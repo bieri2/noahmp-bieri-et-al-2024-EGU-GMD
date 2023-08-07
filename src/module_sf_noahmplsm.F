@@ -198,8 +198,8 @@ MODULE MODULE_SF_NOAHMPLSM
                       !   2 -> on (Hooghoudt's scheme)
    
   INTEGER :: OPT_ROOT ! dynamic rooting depth scheme (Fan et al. 2017)
-                      !   1 -> on  
-                      !   2 -> off
+                      !   1 -> off 
+                      !   2 -> on
 
 !------------------------------------------------------------------------------------------!
 ! Physical Constants:                                                                      !

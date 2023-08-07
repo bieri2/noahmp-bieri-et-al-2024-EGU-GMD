@@ -71,7 +71,7 @@ CONTAINS
                its,ite,  jts,jte,  kts,kte,                    &
                ! Root water uptake scheme
                EASYXY, ROOTACTIVITYXY, INACTIVEXY, KROOTXY, KWTDXY, BTRANIXY, & 
-               PSIXY , GWRDXY, FDEPTHXY, ROOT_UPDATE, &    
+               PSIXY , GWRDXY, FDEPTHXY, ROOT_UPDATE, restart_flag, &    
                MP_RAINC, MP_RAINNC, MP_SHCV, MP_SNOW, MP_GRAUP, MP_HAIL     )
 !----------------------------------------------------------------
     USE MODULE_SF_NOAHMPLSM
@@ -334,9 +334,10 @@ CONTAINS
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  KWTDXY    ! layer depth of water table [-]
     REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  PSIXY     ! soil matric potential [m]
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  GWRDXY    ! root water uptake depth [m]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN)    ::  FDEPTHXY  ! e-folding depth of permeability decrease [m]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  FDEPTHXY  ! e-folding depth of permeability decrease [m]
     REAL,    DIMENSION( ims:ime, 1:nsoil, jms:jme ), INTENT(INOUT) ::  BTRANIXY  ! beta factor for soil moisture stress (0 - 1)
     LOGICAL,                                         INTENT(INOUT) ::  ROOT_UPDATE    ! boolean value - when TRUE, update variables based on root scheme 
+    LOGICAL,                                         INTENT(IN   ) ::  restart_flag
 ! additional output variables
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  PAHXY     ! precipitation advected heat 
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(OUT  ) ::  PAHGXY    ! precipitation advected heat 
@@ -1042,8 +1043,8 @@ CONTAINS
          parameters%HSDAY  = HARVEST (I,J)
        end if
 
-       if(iopt_root == 2) then 
-          NDAYS = DT*ITIMESTEP
+       if((iopt_root == 2) .AND. (restart_flag==.FALSE.)) then 
+          NDAYS = DT*ITIMESTEP ! calculate number of days model has been running
           ! update variables based on root scheme after one year
           if (NDAYS .GT. 31536000.0) then 
              ROOT_UPDATE=.TRUE.
@@ -1051,6 +1052,11 @@ CONTAINS
           else
              ROOT_UPDATE=.FALSE.
           endif
+       endif
+
+       if((I==1).AND.(J==120)) then
+       ! Print value of ROOT_UPDATE
+         print *, "ROOT_UPDATE is ", ROOT_UPDATE
        endif
 
        ! Calculate soil parameters which vary with depth
