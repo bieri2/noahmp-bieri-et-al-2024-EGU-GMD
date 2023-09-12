@@ -1717,6 +1717,7 @@ ENDIF   ! CROPTYPE == 0
       DO IZ = 1,NSOIL
          END_WB = END_WB + SMC(IZ) * DZSNSO(IZ) * 1000.0
       END DO
+
       ! accumualted water change (only for canopy and snow during non-soil timestep)
       ACC_DWATER = ACC_DWATER + (END_WB - BEG_WB)  ! snow, canopy, and soil water change
       ACC_PRCP   = ACC_PRCP   + PRCP * DT        ! accumulated precip 
@@ -2267,7 +2268,7 @@ ENDIF   ! CROPTYPE == 0
            ENDIF
 
          ! Calculate ease function
-           EASY(IZ) = MAX(-( PSIWLT - PSIZ(IZ) )*SOILFACTOR / ( HCAN-MID ), 0.)
+           EASY(IZ) = MAX(-( PSILF - PSIZ(IZ) )*SOILFACTOR / ( HCAN-MID ), 0.)
          END DO
 
          !to grow roots anew, the layer has to be easiest to get water from than the
@@ -6312,34 +6313,36 @@ ENDIF   ! CROPTYPE == 0
 
     QSEVA  = QSEVA * 0.001 
 
-    IF (OPT_ROOT == 1) THEN
-      DO IZ = 1, parameters%NROOT
-            ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001        ! use beta in ETRANI calculation
-      ENDDO
-    ELSE
-      DO IZ = 1, parameters%NROOT
-         IF (ROOT_UPDATE==.FALSE.) THEN                    ! If model running for less than 1yr,
-            ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001        ! use beta in ETRANI calculation
-         ELSE                                              
-            ETRANI(IZ) = ETRAN * ROOTACTIVITY(IZ) * 0.001  ! Use root activity instead of beta 
-         END IF                                            ! if model running for at least 1yr
-      ENDDO
 
-      IF (ROOT_UPDATE==.TRUE.) THEN
-         ETRANSUM = 0.0                                       ! Get root water uptake depth GWRD
-         DO IZ = 1, NSOIL                                     ! Depth above which 95% of 
-            ETRANSUM = ETRANSUM + (ETRAN*ROOTACTIVITY(IZ))    ! root water uptake occurs
-            IF (ETRAN==0.0) THEN                              ! If ETRAN is 0, then GWRD is set to first layer
-               GWRD = 1                                       ! and loop exits
-               EXIT                                       
-            ELSE IF ((ETRANSUM/ETRAN) .ge. 0.95) THEN         ! If reached layer where 95% of uptake has    
-               GWRD = MAX(IZ,1)                               ! occurred, save layer depth as root water uptake 
-               EXIT                                           ! depth GWRD and exit loop
-            ELSE IF (IZ .EQ. NSOIL) THEN                      ! If reached bottom of resolved soil layers, set
-               GWRD = IZ                                      ! GWRD to depth of bottom layer
-            ENDIF                                             
-         ENDDO
-      ENDIF
+    IF (OPT_ROOT == 2) THEN 
+         IF (ROOT_UPDATE==.TRUE.) THEN                                 ! If model running for at least 1yr,
+             DO IZ = 1, parameters%NROOT                               ! Use root activity function instead of beta
+                   ETRANI(IZ) = ETRAN * ROOTACTIVITY(IZ) * 0.001        
+             ENDDO
+
+             ETRANSUM = 0.0                                            ! Get root water uptake depth GWRD
+             DO IZ = 1, NSOIL                                          ! Depth above which 95% of 
+                   ETRANSUM = ETRANSUM + (ETRAN*ROOTACTIVITY(IZ))      ! root water uptake occurs
+                   IF (ETRAN==0.0) THEN                                ! If ETRAN is 0, then GWRD is set to first layer
+                       GWRD = 1                                        ! and loop exits
+                       EXIT
+                   ELSE IF ((ETRANSUM/ETRAN) .ge. 0.95) THEN           ! If reached layer where 95% of uptake has    
+                       GWRD = MAX(IZ,1)                                ! occurred, save layer depth as root water uptake 
+                       EXIT                                            ! depth GWRD and exit loop
+                   ELSE IF (IZ .EQ. NSOIL) THEN                        ! If reached bottom of resolved soil layers, set
+                       GWRD = IZ                                       ! GWRD to depth of bottom layer
+                   ENDIF
+             ENDDO
+
+         ELSE     
+             DO IZ = 1, parameters%NROOT                               ! If model running for less than 1yr,          
+                   ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001             ! use beta function 
+             ENDDO
+         END IF                                           
+    ELSE
+          DO IZ = 1, parameters%NROOT                                  ! If root scheme not activated, 
+                ETRANI(IZ) = ETRAN * BTRANI(IZ) * 0.001                ! use beta in ETRANI calculation
+          ENDDO
     ENDIF
 
 #ifdef WRF_HYDRO

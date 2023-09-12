@@ -1048,7 +1048,6 @@ CONTAINS
           ! update variables based on root scheme after one year
           if (NDAYS .GT. 31536000.0) then 
              ROOT_UPDATE=.TRUE.
-             parameters%NROOT = KROOT  ! update NROOT based on KROOT
           else
              ROOT_UPDATE=.FALSE.
           endif
@@ -1057,6 +1056,10 @@ CONTAINS
        if((I==1).AND.(J==120)) then
        ! Print value of ROOT_UPDATE
          print *, "ROOT_UPDATE is ", ROOT_UPDATE
+       endif
+
+       if((ROOT_UPDATE == .TRUE.) .AND. (iopt_root == 2)) then
+          parameters%NROOT = KROOT  ! update NROOT based on KROOT
        endif
 
        ! Calculate soil parameters which vary with depth
