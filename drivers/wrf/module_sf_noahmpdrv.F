@@ -1053,7 +1053,7 @@ CONTAINS
           endif
        endif
 
-       if((I==1).AND.(J==120)) then
+       if((I==1).AND.(J==120) .AND. (iopt_root == 2)) then
        ! Print value of ROOT_UPDATE
          print *, "ROOT_UPDATE is ", ROOT_UPDATE
        endif
