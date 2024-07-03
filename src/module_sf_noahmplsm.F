@@ -2248,7 +2248,7 @@ ENDIF   ! CROPTYPE == 0
          HCAN  = parameters%HVT*(2./3.) ! Canopy height
 
          ! Start calculation of ease function and root activity
-         DO IZ = 1, MIN(KROOT, KWTD)
+         DO IZ = 1, MIN(KROOT+1, KWTD)
            IF (IZ==1) THEN            ! Get layer midpoints
              MID = -0.05
            ELSE
@@ -2278,7 +2278,7 @@ ENDIF   ! CROPTYPE == 0
          !eliminate small root activity
          WHERE(EASY .lt. 0.001*MAXEASY) EASY = 0.
 
-         DO IZ = 1, KROOT
+         DO IZ = 1, KROOT+1
            if(INACTIVEDAYS(IZ) .gt. MAXINACTIVEDAYS .and. EASY(IZ) .lt. MAXEASY) EASY(IZ) = 0.
          ENDDO
 
